@@ -24,10 +24,12 @@ DEFAULT_BOARDS = ["Gossiping", "Tech_Job", "Stock", "AI", "MobileComm", "Food"]
 DEFAULT_MIN_HEAT = 10
 
 class PTTTracker:
-    def __init__(self, boards=None, keywords=None, min_heat=10):
+    def __init__(self, boards=None, keywords=None, min_heat=10, telegram_token=None, telegram_chat_id=None):
         self.boards = boards or DEFAULT_BOARDS
         self.keywords = keywords or []
         self.min_heat = min_heat
+        self.telegram_token = telegram_token
+        self.telegram_chat_id = telegram_chat_id
         self.session = requests.Session()
         
         # 設定 Cookie 表明已滿 18 歲
@@ -36,6 +38,25 @@ class PTTTracker:
         # 儲存已讀文章
         self.read_file = "read_articles.json"
         self.read_articles = self.load_read_articles()
+    
+    def send_telegram_message(self, message):
+        """發送 Telegram 訊息"""
+        if not self.telegram_token or not self.telegram_chat_id:
+            return False
+        
+        url = f"https://api.telegram.org/bot{self.telegram_token}/sendMessage"
+        data = {
+            "chat_id": self.telegram_chat_id,
+            "text": message,
+            "parse_mode": "HTML"
+        }
+        
+        try:
+            response = self.session.post(url, json=data, timeout=10)
+            return response.status_code == 200
+        except Exception as e:
+            print(f"Telegram 發送失敗: {e}")
+            return False
     
     def load_read_articles(self):
         """載入已讀文章"""
@@ -204,6 +225,10 @@ class PTTTracker:
             print("\n🔔 關鍵字匹配文章:")
             for article in keyword_matches:
                 print(self.format_article(article))
+                
+                # 發送 Telegram 通知
+                message = f"🔔 <b>PTT 關鍵字通知</b>\n\n{self.format_article(article)}"
+                self.send_telegram_message(message)
         
         if new_articles:
             print(f"\n🔥 熱門文章 ({len(new_articles)} 篇):")
