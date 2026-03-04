@@ -1,8 +1,8 @@
 {
-  "boards": ["Gossiping", "Tech_Job", "Stock", "AI", "MobileComm", "Food"],
-  "keywords": ["AI", "機器學習", "投資", "比特幣", "OpenAI", "ChatGPT"],
-  "min_heat": 10,
-  "interval_minutes": 10,
+  "boards": ["MacShop", "Gossiping", "Tech_Job", "Stock", "AI", "MobileComm", "Food"],
+  "keywords": ["Mac mini", "mac mini", "MAC MINI", "15 pro", "15Pro", "iPhone 15"],
+  "min_heat": 1,
+  "interval_minutes": 5,
   "telegram_token": "",
   "telegram_chat_id": ""
 }
