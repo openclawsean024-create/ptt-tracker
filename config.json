@@ -1,0 +1,8 @@
+{
+  "boards": ["Gossiping", "Tech_Job", "Stock", "AI", "MobileComm", "Food"],
+  "keywords": ["AI", "機器學習", "投資", "比特幣", "OpenAI", "ChatGPT"],
+  "min_heat": 10,
+  "interval_minutes": 10,
+  "telegram_token": "",
+  "telegram_chat_id": ""
+}
