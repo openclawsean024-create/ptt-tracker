@@ -13,6 +13,7 @@ import sys
 import argparse
 from datetime import datetime
 import hashlib
+import threading
 
 # PTT 網址
 PTT_URL = "https://www.ptt.cc"
@@ -258,17 +259,206 @@ def load_config():
     return {}
 
 
+def save_config(config):
+    """儲存設定檔"""
+    config_file = "config.json"
+    try:
+        with open(config_file, 'w', encoding='utf-8') as f:
+            json.dump(config, f, ensure_ascii=False, indent=2)
+        return True
+    except Exception as e:
+        print(f"儲存設定失敗: {e}")
+        return False
+
+
+def handle_telegram_command(update):
+    """處理 Telegram 指令"""
+    if 'message' not in update:
+        return
+    
+    message = update['message']
+    text = message.get('text', '')
+    chat_id = message['chat']['id']
+    
+    # 解析指令
+    if not text.startswith('/ptt'):
+        return None
+    
+    parts = text.split()
+    command = parts[0].lower()
+    args = parts[1:]
+    
+    config = load_config()
+    response = ""
+    
+    if command == '/pttlist' or command == '/pttlist@ptt_tracker_bot':
+        response = f"""📋 <b>PTT 追蹤設定</b>
+
+�看板: {', '.join(config.get('boards', []))}
+🔑關鍵字: {', '.join(config.get('keywords', [])) or '（無）'}
+🔥熱度閾值: {config.get('min_heat', 10)}"""
+    
+    elif command == '/ptthelp' or command == '/ptthelp@ptt_tracker_bot':
+        response = """📖 <b>PTT 指令說明</b>
+
+/pttlist - 查看目前設定
+/pttadd <關鍵字> - 新增關鍵字
+/pttremove <關鍵字> - 移除關鍵字
+/pttaddboard <看板> - 新增看板
+/pttremoveboard <看板> - 移除看板
+/pttset <數字> - 設定熱度閾值
+/pttnow - 立即檢查
+/ptthelp - 說明"""
+    
+    elif command == '/pttadd' or command == '/pttadd@ptt_tracker_bot':
+        if not args:
+            response = "❌ 請輸入關鍵字，如：/pttadd AI"
+        else:
+            keyword = ' '.join(args)
+            keywords = config.get('keywords', [])
+            if keyword not in keywords:
+                keywords.append(keyword)
+                config['keywords'] = keywords
+                save_config(config)
+                response = f"✅ 已新增關鍵字：{keyword}"
+            else:
+                response = f"⚠️ 關鍵字已存在：{keyword}"
+    
+    elif command == '/pttremove' or command == '/pttremove@ptt_tracker_bot':
+        if not args:
+            response = "❌ 請輸入關鍵字，如：/pttremove AI"
+        else:
+            keyword = ' '.join(args)
+            keywords = config.get('keywords', [])
+            if keyword in keywords:
+                keywords.remove(keyword)
+                config['keywords'] = keywords
+                save_config(config)
+                response = f"✅ 已移除關鍵字：{keyword}"
+            else:
+                response = f"⚠️ 找不到關鍵字：{keyword}"
+    
+    elif command == '/pttaddboard' or command == '/pttaddboard@ptt_tracker_bot':
+        if not args:
+            response = "❌ 請輸入看板，如：/pttaddboard Gossiping"
+        else:
+            board = args[0]
+            boards = config.get('boards', [])
+            if board not in boards:
+                boards.append(board)
+                config['boards'] = boards
+                save_config(config)
+                response = f"✅ 已新增看板：{board}"
+            else:
+                response = f"⚠️ 看板已存在：{board}"
+    
+    elif command == '/pttremoveboard' or command == '/pttremoveboard@ptt_tracker_bot':
+        if not args:
+            response = "❌ 請輸入看板，如：/pttremoveboard Gossiping"
+        else:
+            board = args[0]
+            boards = config.get('boards', [])
+            if board in boards:
+                boards.remove(board)
+                config['boards'] = boards
+                save_config(config)
+                response = f"✅ 已移除看板：{board}"
+            else:
+                response = f"⚠️ 找不到看板：{board}"
+    
+    elif command == '/pttset' or command == '/pttset@ptt_tracker_bot':
+        if not args:
+            response = "❌ 請輸入熱度數字，如：/pttset 10"
+        else:
+            try:
+                heat = int(args[0])
+                config['min_heat'] = heat
+                save_config(config)
+                response = f"✅ 已設定熱度閾值：{heat}"
+            except:
+                response = "❌ 請輸入數字"
+    
+    elif command == '/pttnow' or command == '/pttnow@ptt_tracker_bot':
+        # 立即執行檢查
+        tracker = PTTTracker(
+            boards=config.get('boards', DEFAULT_BOARDS),
+            keywords=config.get('keywords', []),
+            min_heat=config.get('min_heat', 10)
+        )
+        keyword_matches, new_articles = tracker.run()
+        
+        if keyword_matches:
+            response = f"🔔 找到 {len(keyword_matches)} 篇關鍵字匹配文章"
+        elif new_articles:
+            response = f"🔥 找到 {len(new_articles)} 篇熱門文章"
+        else:
+            response = "✅ 沒有新的熱門文章或關鍵字匹配"
+    
+    else:
+        response = "❌ 未知指令，/ptthelp 查看說明"
+    
+    return {'chat_id': chat_id, 'text': response, 'parse_mode': 'HTML'}
+
+
+def telegram_polling(token, offset=0):
+    """Telegram Polling 模式"""
+    while True:
+        try:
+            url = f"https://api.telegram.org/bot{token}/getUpdates"
+            params = {'timeout': 30, 'offset': offset}
+            
+            if offset:
+                params['offset'] = offset
+            
+            response = requests.get(url, params=params, timeout=35)
+            data = response.json()
+            
+            if data.get('ok'):
+                updates = data.get('result', [])
+                for update in updates:
+                    offset = update['update_id'] + 1
+                    
+                    result = handle_telegram_command(update)
+                    if result:
+                        # 發送回覆
+                        send_url = f"https://api.telegram.org/bot{token}/sendMessage"
+                        requests.post(send_url, json=result)
+        
+        except Exception as e:
+            print(f"Polling 錯誤: {e}")
+            time.sleep(5)
+
+
 def main():
+    # 設定 UTF-8 輸出
+    if sys.platform == 'win32':
+        import io
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    
     parser = argparse.ArgumentParser(description='PTT 文章追蹤器')
     parser.add_argument('--boards', nargs='+', help='指定看板')
     parser.add_argument('--keywords', nargs='+', help='關鍵字')
     parser.add_argument('--min-heat', type=int, default=DEFAULT_MIN_HEAT, help='熱度閾值')
     parser.add_argument('--interval', type=int, help='循環間隔（分鐘）')
+    parser.add_argument('--bot', action='store_true', help='啟動 Telegram Bot 模式')
     
     args = parser.parse_args()
     
     # 載入設定
     config = load_config()
+    
+    # Telegram Bot 模式
+    if args.bot:
+        token = config.get('telegram_token')
+        if not token:
+            print("[ERROR] config.json 中找不到 telegram_token")
+            return
+        
+        print("\n[Telegram Bot Mode Started]")
+        print("Send /ptthelp for commands\n")
+        
+        telegram_polling(token)
+        return
     
     # 參數優先順序：命令列 > 設定檔 > 預設
     boards = args.boards or config.get('boards', DEFAULT_BOARDS)
