@@ -12,6 +12,6 @@
                  ],
     "min_heat":  1,
     "interval_minutes":  5,
-    "telegram_token":  "REPLACE_ME",
-    "telegram_chat_id":  "REPLACE_ME"
+    "telegram_token":  "YOUR_TELEGRAM_BOT_TOKEN",
+    "telegram_chat_id":  "YOUR_TELEGRAM_CHAT_ID"
 }
