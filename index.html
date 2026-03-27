@@ -138,13 +138,6 @@
   </div>
 
   <script>
-    // Initialize with demo data so page is never blank even before first fetch
-    let allData = { hotArticles: DEMO_ARTICLES, keywordMatches: [] };
-    let currentTab = 'all';
-
-    // Initial render immediately so page isn't blank on load
-    renderList();
-
     // Demo data shown when API has no results or is unreachable
     const DEMO_ARTICLES = [
       {
@@ -172,6 +165,13 @@
         url: 'https://www.ptt.cc/bbs/Stock/M.1234567892.A.html',
       },
     ];
+
+    // Initialize with demo data so page is never blank even before first fetch
+    let allData = { hotArticles: DEMO_ARTICLES, keywordMatches: [] };
+    let currentTab = 'all';
+
+    // Initial render immediately so page isn't blank on load
+    renderList();
 
     async function fetchArticles() {
       const btn = document.getElementById('refreshBtn');
