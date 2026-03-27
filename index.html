@@ -141,6 +141,34 @@
     let allData = { hotArticles: [], keywordMatches: [] };
     let currentTab = 'all';
 
+    // Demo data shown when API has no results or is unreachable
+    const DEMO_ARTICLES = [
+      {
+        title: '【心得】Mac mini M4 開箱分享',
+        author: 'applefans',
+        date: '03/27',
+        pushes: 87,
+        board: 'MacShop',
+        url: 'https://www.ptt.cc/bbs/MacShop/M.1234567890.A.html',
+      },
+      {
+        title: '[情報] iPhone 15 Pro Max 降價資訊整理',
+        author: 'deallin',
+        date: '03/26',
+        pushes: 52,
+        board: 'MobileComm',
+        url: 'https://www.ptt.cc/bbs/MobileComm/M.1234567891.A.html',
+      },
+      {
+        title: '[熱門] Stock 美股今晚暴跌 500 點',
+        author: 'stockking',
+        date: '03/27',
+        pushes: 120,
+        board: 'Stock',
+        url: 'https://www.ptt.cc/bbs/Stock/M.1234567892.A.html',
+      },
+    ];
+
     async function fetchArticles() {
       const btn = document.getElementById('refreshBtn');
       const status = document.getElementById('status');
@@ -164,10 +192,11 @@
         status.className = 'status';
         renderList();
       } catch (err) {
-        status.textContent = '❌ 錯誤：' + err.message;
-        status.className = 'status error';
-        document.getElementById('articleList').innerHTML =
-          '<div class="empty">載入失敗，請稍後再試</div>';
+        // Show demo data on error so the UI is never blank
+        allData = { hotArticles: DEMO_ARTICLES, keywordMatches: [] };
+        status.textContent = '⚠️ 無法連線 PTT（顯示示範資料）';
+        status.className = 'status';
+        renderList();
       } finally {
         btn.disabled = false;
       }
@@ -207,11 +236,14 @@
       const list = currentTab === 'all' ? allData.hotArticles : allData.keywordMatches;
       const el = document.getElementById('articleList');
       if (list.length === 0) {
-        el.innerHTML = `<div class="empty">目前沒有文章</div>`;
+        el.innerHTML = `<div class="empty">目前沒有文章，點擊「刷新」載入最新內容</div>`;
       } else {
         el.innerHTML = list.map(renderArticle).join('');
       }
     }
+
+    // Auto-load on page open
+    fetchArticles();
   </script>
 </body>
 </html>
