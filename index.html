@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PTT 文章追蹤器</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0d1117;
+      color: #e6edf3;
+      min-height: 100vh;
+      padding: 24px;
+    }
+    .container { max-width: 800px; margin: 0 auto; }
+
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 24px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid #30363d;
+    }
+    h1 { font-size: 1.5rem; color: #58a6ff; }
+    .badge {
+      background: #238636;
+      color: #fff;
+      font-size: 0.75rem;
+      padding: 2px 8px;
+      border-radius: 12px;
+    }
+
+    .controls { display: flex; gap: 8px; margin-bottom: 20px; }
+    button {
+      background: #238636;
+      color: #fff;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.875rem;
+      transition: background 0.2s;
+    }
+    button:hover { background: #2ea043; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .status {
+      font-size: 0.8rem;
+      color: #8b949e;
+      margin-bottom: 16px;
+    }
+    .status.error { color: #f85149; }
+
+    .tabs { display: flex; gap: 4px; margin-bottom: 16px; }
+    .tab {
+      padding: 6px 14px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.875rem;
+      color: #8b949e;
+      background: transparent;
+      border: none;
+    }
+    .tab.active { background: #30363d; color: #e6edf3; }
+
+    .article-list { display: flex; flex-direction: column; gap: 12px; }
+    .article {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 14px 16px;
+      transition: border-color 0.2s;
+    }
+    .article:hover { border-color: #58a6ff; }
+    .article-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 6px;
+    }
+    .emoji { font-size: 1rem; }
+    .board {
+      background: #1f6feb;
+      color: #fff;
+      font-size: 0.7rem;
+      padding: 1px 7px;
+      border-radius: 10px;
+    }
+    .pushes { font-size: 0.8rem; color: #8b949e; }
+    .article-title {
+      font-size: 0.95rem;
+      color: #e6edf3;
+      margin-bottom: 4px;
+      word-break: break-word;
+    }
+    .article-title a { color: inherit; text-decoration: none; }
+    .article-title a:hover { text-decoration: underline; color: #58a6ff; }
+    .article-meta { font-size: 0.75rem; color: #8b949e; }
+    .article-link {
+      display: inline-block;
+      margin-top: 6px;
+      font-size: 0.75rem;
+      color: #58a6ff;
+      text-decoration: none;
+    }
+    .article-link:hover { text-decoration: underline; }
+
+    .empty {
+      text-align: center;
+      padding: 40px;
+      color: #8b949e;
+      font-size: 0.9rem;
+    }
+    .loading { text-align: center; padding: 40px; color: #8b949e; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>📋 PTT 文章追蹤器</h1>
+      <span class="badge">Node.js</span>
+    </header>
+
+    <div class="controls">
+      <button id="refreshBtn" onclick="fetchArticles()">🔄 刷新</button>
+    </div>
+
+    <div class="status" id="status">點擊「刷新」載入文章</div>
+
+    <div class="tabs">
+      <button class="tab active" id="tabAll" onclick="showTab('all')">🔥 熱門文章</button>
+      <button class="tab" id="tabKeyword" onclick="showTab('keyword')">🎯 關鍵字命中</button>
+    </div>
+
+    <div class="article-list" id="articleList"></div>
+  </div>
+
+  <script>
+    let allData = { hotArticles: [], keywordMatches: [] };
+    let currentTab = 'all';
+
+    async function fetchArticles() {
+      const btn = document.getElementById('refreshBtn');
+      const status = document.getElementById('status');
+      btn.disabled = true;
+      status.textContent = '⏳ 載入中…';
+      status.className = 'status';
+
+      try {
+        const res = await fetch('/api/tracker');
+        const data = await res.json();
+
+        if (!data.success) throw new Error(data.error || '載入失敗');
+
+        allData = {
+          hotArticles: data.hotArticles || [],
+          keywordMatches: data.keywordMatches || [],
+        };
+
+        const time = new Date(data.timestamp).toLocaleString('zh-TW');
+        status.textContent = `✅ 更新時間：${time}　🔥 ${allData.hotArticles.length} 篇　🎯 ${allData.keywordMatches.length} 篇命中`;
+        status.className = 'status';
+        renderList();
+      } catch (err) {
+        status.textContent = '❌ 錯誤：' + err.message;
+        status.className = 'status error';
+        document.getElementById('articleList').innerHTML =
+          '<div class="empty">載入失敗，請稍後再試</div>';
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    function showTab(tab) {
+      currentTab = tab;
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      document.getElementById(tab === 'all' ? 'tabAll' : 'tabKeyword').classList.add('active');
+      renderList();
+    }
+
+    function articleEmoji(pushes) {
+      if (pushes >= 50) return '🔥';
+      if (pushes >= 20) return '📈';
+      if (pushes > 0) return '🆕';
+      return '📝';
+    }
+
+    function renderArticle(a) {
+      return `
+        <div class="article">
+          <div class="article-header">
+            <span class="emoji">${articleEmoji(a.pushes)}</span>
+            <span class="board">${a.board}</span>
+            <span class="pushes">推 ${a.pushes}</span>
+          </div>
+          <div class="article-title">
+            <a href="${a.url}" target="_blank" rel="noopener">${a.title}</a>
+          </div>
+          <div class="article-meta">作者：${a.author} &nbsp;|&nbsp; 日期：${a.date}</div>
+          <a class="article-link" href="${a.url}" target="_blank" rel="noopener">→ PTT 閱讀</a>
+        </div>`;
+    }
+
+    function renderList() {
+      const list = currentTab === 'all' ? allData.hotArticles : allData.keywordMatches;
+      const el = document.getElementById('articleList');
+      if (list.length === 0) {
+        el.innerHTML = `<div class="empty">目前沒有文章</div>`;
+      } else {
+        el.innerHTML = list.map(renderArticle).join('');
+      }
+    }
+  </script>
+</body>
+</html>

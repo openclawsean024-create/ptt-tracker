@@ -1,0 +1,13 @@
+{
+  "version": 2,
+  "builds": [
+    { "src": "api/tracker.js", "use": "@vercel/node" },
+    { "src": "index.html", "use": "static" },
+    { "src": "tracker.js", "use": "@vercel/node" },
+    { "src": "package.json", "use": "@vercel/node" }
+  ],
+  "routes": [
+    { "src": "/api/tracker", "dest": "/api/tracker.js" },
+    { "src": "/", "dest": "/index.html" }
+  ]
+}
