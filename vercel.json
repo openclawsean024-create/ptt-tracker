@@ -3,8 +3,5 @@
   "rewrites": [
     { "source": "/api/tracker", "destination": "/api/tracker.js" },
     { "source": "/(.*)", "destination": "/index.html" }
-  ],
-  "functions": {
-    "api/tracker.js": { "runtime": "nodejs22.x" }
-  }
+  ]
 }
