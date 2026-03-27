@@ -1,4 +1,4 @@
-const { run } = require('../tracker.js');
+const { run } = require(__dirname + '/../tracker.js');
 
 module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');

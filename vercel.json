@@ -1,13 +1,10 @@
 {
   "version": 2,
-  "builds": [
-    { "src": "api/tracker.js", "use": "@vercel/node" },
-    { "src": "index.html", "use": "static" },
-    { "src": "tracker.js", "use": "@vercel/node" },
-    { "src": "package.json", "use": "@vercel/node" }
+  "rewrites": [
+    { "source": "/api/tracker", "destination": "/api/tracker.js" },
+    { "source": "/(.*)", "destination": "/index.html" }
   ],
-  "routes": [
-    { "src": "/api/tracker", "dest": "/api/tracker.js" },
-    { "src": "/", "dest": "/index.html" }
-  ]
+  "functions": {
+    "api/tracker.js": { "runtime": "nodejs22.x" }
+  }
 }

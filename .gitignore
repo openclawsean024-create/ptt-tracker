@@ -4,3 +4,4 @@ config.local.json
 config.secrets.json
 __pycache__/
 *.pyc
+.vercel
