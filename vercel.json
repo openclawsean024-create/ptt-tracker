@@ -1,7 +1,6 @@
 {
-  "version": 2,
-  "rewrites": [
-    { "source": "/api/tracker", "destination": "/api/tracker.js" },
-    { "source": "/(.*)", "destination": "/index.html" }
-  ]
+  "framework": "nextjs",
+  "buildCommand": "npm run build",
+  "installCommand": "npm install",
+  "outputDirectory": ".next"
 }
