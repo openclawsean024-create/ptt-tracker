@@ -835,3 +835,53 @@ bd0ea76 chore(prd): sweet-spot-driven rewrite — ptt-tracker
 v3.0 的 follow-up goal 草稿已存放在 `prompts/ptt-tracker/follow-up-v3.0.md`(**不**進 repo),列出啟動 v3.0 前的 hard prerequisites(包括 v2.x round 必須先完成的測試覆蓋、secrets hygiene、CSP / CORS 控制、CI 綠燈等)。
 
 啟動 v3.0 前,必須由 user 明確同意後由 orchestrator 評估並 `create_goal`,**不會**由本輪自動接續。
+
+---
+
+## 附錄 B — round-2 實作紀錄(2026-08-29)
+
+> 本附錄由 `rpb(docs)` 在 round-2 (v3.0 minimal slice) 結束時新增,**不修改 §1-§15 的 scope 章節、亦不修改附錄 A**(round-1 已 anchor 的內容)。僅作為 round-2 實際做了哪些事、明確不在範圍內的項目、以及對應 commit hashes 的實作紀錄。
+
+### B.1 round-2 範圍(對應 `PLAN.md` Milestone 1-3)
+
+本輪(round-2,`v3.0 多來源資料流 MVP`)對應 v3.0「中文社群即時雷達」中,真正能在一輪內有可驗收產出的最小切片 —— 跨平台資料來源抽象化 + Dcard connector。實作聚焦在三個層面:
+
+1. **SourceConnector 抽象化 + 既有 PTT 對齊新介面**(M1,backend)— 新增 `sources/` 目錄,定義 `SourceConnector.js` 介面(`name` / `fetch({boards, keywords, since})` / `parseArticle(raw)` / `normalize(article)` hook)。把 `tracker.js` 與 `api/tracker.js` 內 PTT-specific 抓取 / 解析邏輯抽到 `sources/ptt.js`,主程式改成 `MultiSourceTracker` orchestrator。
+2. **Dcard connector(新來源)**(M2,backend)— `sources/dcard.js` 基於 Dcard 官方 `/api/posts`(無需 auth、公開看板),`reactionCount` 對應 PTT `pushes`,`createdAt` 對應統一 `timestamp`;吐統一 Article schema。`config.json` 新增 `sources` 欄位(`["ptt"]` 預設);`config.example.json` 加 `sources` / `dcard_forums` 區塊。
+3. **Source abstraction fixture + 統一 Article schema 測試**(M3,qa)— `tests/_pure_mirrors.py` 延伸 `normalize_article()` 把 PTT / Dcard normalize 鏡像到 Python;新增 `tests/test_source_schema.py` 驗證 `{title, url, board, author, pushes, timestamp, source}` keys 對齊;`tests/test_dcard_connector.py` 用 fixture mock,不實際打 Dcard API。
+
+完整 milestone 規劃見 repo root 的 [`PLAN.md`](../PLAN.md)。
+
+### B.2 round-2 commit log(以 `git log --oneline` 為準)
+
+本輪 docs 落地時的 commit 序列(由 `git log --oneline -10` 取得;backend / qa 的 round-2 commits 為 parallel work-in-flight,以該 agent commit 為準):
+
+```
+<docs-hash>   rpb(docs): round-2 docs — README v3.0 status, CHANGELOG round-2 entry, SPEC 附錄 B  ← 本附錄建立 commit
+56c7bef       rpb(orchestrator): add round-2 PLAN (v3.0 minimal slice: source abstraction + Dcard connector)
+3dfbcbb       rpb(orchestrator): round-1 final verify + summary — all 9 milestones done, ready for user review
+```
+
+> **注意**:backend(M1+M2)與 qa(M3)的 round-2 commits 為 parallel work,當下可能尚未落地;最終 round-2 commit graph 請參考 orchestrator 的 round-2 final verify commit + `git log` 完整序列。本附錄 docs commit **僅**包含 `README.md` / `CHANGELOG.md` / `PRD/SPEC.md`(append-only)/ `rpb-docs-m4-verify.log` 四個檔。
+
+### B.3 明確不在 round-2 範圍(Deferred)
+
+下列項目**於本輪完全沒動**,仍停留在 §1-§15 的規劃階段;啟動前需由 user 明確同意 + orchestrator 評估 hard prerequisites:
+
+| 項目 | 原因 | 預期 round |
+|---|---|---|
+| Threads connector | 需 Meta Business 帳號申請,非個人可解 | round 3+ 或明確 deferred |
+| 巴哈姆特 connector | 無官方公開 API;scrape 法規 grey zone | round 3+ 或明確 deferred |
+| AI 情緒分類(GPT-4o-mini) | 需 OpenAI 帳號 + cost | round 4 |
+| 多通道 LINE / Slack / Email 警示 | 需外部 webhook 憑證(SPEC §3 P0-4) | round 5+ |
+| PDF 週報 | SPEC §3 P0-5 | round 5+ |
+| BullMQ / Redis worker infra | 現規模不需要(SPEC §3 P0-1「每平台獨立 worker」) | round 5+ |
+| Multi-tenant / 註冊 / 付費 | SPEC §1.5 non-goals | deferred(無期) |
+| `git filter-repo` 洗歷史 | 改所有 SHA,需 user sign-off + force-push 協調 | 沿 round-1 deferred |
+
+### B.4 round-2 文件同步摘要
+
+- `README.md`:在「功能」段落**下方**新增「v3.0 狀態(Status)」,標 **experimental**,列目前支援來源(`PTT` + `Dcard`)、roadmap(Threads / 巴哈姆特)、deferred feature 清單;內部連結(`CHANGELOG.md` / `SECURITY.md` / `PLAN.md`)全部保留。字數 209 → 263(1.26x,well under 1.5x cap)。
+- `CHANGELOG.md`:在 round-1 entry **之後**新增 round-2 entry,Keep-a-Changelog 1.1.0 風格(`Added` / `Changed` / `Deferred`)。Round-1 entry 完整保留。
+- `PRD/SPEC.md`:純 append 附錄 B;**§1-§15 與附錄 A byte-for-byte 不動**(SHA256 of first 795 lines 仍為 `5b11411354df23449ed953dcf6b1d7113300a52393703bad8d14cc18060f7999`,與 round-1 round-1 末版一致)。
+- `rpb-docs-m4-verify.log`:scope check + bash block validation + SPEC §1-§15 SHA256 integrity check。

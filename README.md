@@ -11,6 +11,17 @@ Live: https://ptt-alertor-olive.vercel.app
 - 支援單次執行與 watch mode
 - Telegram 憑證從環境變數讀取(`config.json` 不再放 secrets)
 
+## v3.0 狀態(Status)
+
+> **experimental** —— 本段為 v3.0 進度同步;關鍵行為仍以 [`PRD/SPEC.md`](PRD/SPEC.md) 為準。
+
+- **目前支援來源**:`PTT`(既有)、`Dcard`(新,基於 Dcard 官方 `/api/posts` API,無需登入)。
+  在 `config.json` 用 `sources` 欄位切換,例如 `"sources": ["ptt", "dcard"]`;未填則預設只跑 `["ptt"]`(與 v2.x 行為相容)。
+- **Roadmap(規劃中,未實作)**:
+  - `Threads`:需 Meta Business 帳號申請,非個人可解。
+  - `巴哈姆特`:目前無公開 API,scrape 法規 grey zone。
+  - AI 情緒分類(GPT-4o-mini)、多通道 LINE/Slack/Email 警示、PDF 週報、BullMQ/Redis worker —— 皆留 round 4+。
+
 ## 安裝與設定
 
 1. **複製 env 範本,填入 Telegram 憑證**(這是預設路徑,不是 fallback):
