@@ -1,0 +1,107 @@
+=== rpb-qa-m3-verify.log — round-2 M3 — source schema + Dcard connector tests ===
+generated: 2026-08-29T15:40:38Z
+branch:    rpb/round-2-v3-mvp
+base HEAD: c15cfb2  (rpb(backend): add Dcard source connector (round-2 v3.0 milestone 2))
+
+## scope (qa-owned files only)
+  MOD: tests/_pure_mirrors.py       (+209 / -0 — additive: normalize_article + helpers)
+  NEW: tests/_dcard_fixtures.py
+  NEW: tests/test_source_schema.py
+  NEW: tests/test_dcard_connector.py
+  NEW: rpb-qa-m3-verify.log         (this file)
+
+## file line counts
+       317 tests/_pure_mirrors.py
+       226 tests/_dcard_fixtures.py
+       266 tests/test_source_schema.py
+       325 tests/test_dcard_connector.py
+      1134 total
+
+## [1/7] python3 -m pytest --collect-only
+  
+  -- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+  ========================= 105 tests collected in 0.10s =========================
+  exit: 0
+
+## [2/7] python3 -m pytest -q  (round-1 37 + round-2 68 = 105)
+      warnings.warn(
+  
+  -- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+  105 passed, 1 warning in 0.10s
+  exit: 0
+
+## [3/7] round-1 regression gate — the 37 must stay green in isolation
+  -- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+  37 passed, 1 warning in 0.07s
+  exit: 0
+
+## [4/7] round-2 new suites
+  test_source_schema.py:    36 passed in 0.01s
+  test_dcard_connector.py:  32 passed in 0.01s
+  (each suite also passes standalone — no inter-test order dependency)
+
+## [5/7] python3 -m compileall .
+  Listing './sources'...
+  Listing './tests'...
+  exit: 0
+
+## [6/7] node --check (5 files)
+  tracker.js: OK
+  api/tracker.js: OK
+  sources/SourceConnector.js: OK
+  sources/dcard.js: OK
+  sources/ptt.js: OK
+  exit: 0
+
+## [7/7] mirror-vs-production drift check (13 payloads through both impls)
+  Every fixture normalized by BOTH tests/_pure_mirrors.normalize_article (Python)
+  and sources/dcard.js normalizeArticle / sources/ptt.js PttConnector.normalize (Node),
+  then compared key-by-key.  'now()' timestamps compared by date prefix + ISO 'Z' suffix.
+  cases compared: 13   DRIFT COUNT: 0
+  exit: 0
+
+## test inventory (68 new)
+  tests/test_source_schema.py    — 36 tests
+    PTT schema conformance ......... 6  (unified keys, field passthrough, source tag,
+                                        sparse defaults, legacy extras, 3x parametrized)
+    Dcard schema conformance ....... 14 (same set, 8x parametrized scenarios)
+    cross-source consistency ....... 4  (identical key sets, all-fixture key-set equality,
+                                        source tag distinguishes, unknown source rejected)
+    pushes numeric regression ...... 12 (int not str/bool for both sources, 8x parametrized
+                                        Dcard guard, heat alias, round-1 heat-filter flow)
+  tests/test_dcard_connector.py  — 32 tests
+    happy-path full mapping ........ 2
+    source tag / pollution guard ... 2
+    timestamp ISO 8601 ............. 4  (parseable, 8x parametrized, now() fallback, date)
+    url construction ............... 4  (alias+id, per-post alias, href alias, empty parts)
+    pushes = reactionCount ......... 5  (not likeCount/commentCount, missing, zero,
+                                        garbage, negative)
+    author / board fallbacks ....... 4
+    defensive defaults ............. 4  ({} yields 10 keys, defaults, None, purity)
+
+## fixture scenarios (tests/_dcard_fixtures.py) — NO network, all static
+  RAW_DCARD_POST ...................... happy path, all fields populated
+  RAW_DCARD_POST_SPARSE ............... id + title + forumAlias only
+  RAW_DCARD_POST_HIGH_REACTION ........ reaction 4210 / like 88 / comment 9 (field-mixup guard)
+  RAW_DCARD_POST_ZERO_REACTION ........ legitimate 0
+  RAW_DCARD_POST_NO_USER .............. user object has id but no nickname (author fallback)
+  RAW_DCARD_POST_NO_REACTION .......... reactionCount key absent (pushes=0 fallback)
+  RAW_DCARD_POST_GARBAGE_REACTION ..... reactionCount = 'not-a-number'
+  RAW_DCARD_POST_NEGATIVE_REACTION .... reactionCount = -25
+  RAW_PTT_POST / _EXPLODED / _SPARSE ... PTT counterparts for cross-source pairing
+
+## scope discipline
+  production code (sources/*.js, tracker.js, api/tracker.js, ptt_tracker.py): NOT MODIFIED
+  round-1 tests (conftest.py, test_config_loader/keyword_match/heat_filter, pytest.ini): NOT MODIFIED
+  tests/_pure_mirrors.py change is purely ADDITIVE:
+    added/deleted/file: 209	0	tests/_pure_mirrors.py
+  (round-1 load_config_with_env / match_keywords / filter_by_heat unchanged)
+
+## summary
+  pytest collected: 105   passed: 105   failed: 0
+    round-1 baseline: 37 (unchanged)
+    round-2 added:    68
+  compileall: exit 0
+  node --check: 5/5 OK
+  mirror-vs-prod drift: 0
+  zero network calls to dcard.tw (all fixtures static)
