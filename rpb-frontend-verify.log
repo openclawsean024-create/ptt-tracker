@@ -1,0 +1,138 @@
+==============================================================
+rpb-frontend-verify.log — Milestone 2: Frontend polish + CSP
+Branch: rpb/round-1-productionize
+Owner: frontend
+==============================================================
+
+[verify 1] node --check tracker.js api/tracker.js
+$ node --check tracker.js api/tracker.js
+(no output = OK, syntax valid)
+exit 0
+
+[verify 2] node --check app.js  (new external script extracted from index.html)
+$ node --check app.js
+(no output = OK, syntax valid)
+exit 0
+
+[verify 3] vercel.json parse + has headers section
+$ python3 -c "import json; d=json.load(open('vercel.json')); assert 'headers' in d, 'vercel.json needs headers section'"
+(no output = OK)
+exit 0
+
+[verify 4] vercel.json structure summary
+$ python3 -c "import json; d=json.load(open('vercel.json')); assert 'rewrites' in d, 'rewrites must be preserved'; print('OK vercel.json structure'); print('headers count:', len(d['headers']))"
+OK vercel.json structure
+headers count: 1
+exit 0
+
+[verify 5] innerHTML user-input write check (hard rule)
+$ git grep -nE "\.innerHTML\s*=\s*['\"\`]" index.html
+(no output, exit 1 = no matches)
+exit 1 (= no matches = OK)
+
+Explanation: the previous index.html used `el.innerHTML = list.map(renderArticle).join('')`,
+which built DOM via template-literal interpolation of user-derived fields (a.title, a.author,
+a.url). Those fields come from the PTT scraper in api/tracker.js; the original code stripped
+tags but did not escape all HTML, so any residual `<script>`, `onerror=`, or `"javascript:"`
+payload from PTT content could execute in the page.
+
+Refactor: renderList() now clears the list with while-loop removeChild() and builds every
+article via document.createElement + textContent / setAttribute. No string concatenation
+reaches innerHTML. Article text goes through textContent; href goes through .href (the URL
+setter, not innerHTML). This is the canonical XSS-safe DOM pattern and removes the innerHTML
+risk entirely.
+
+Note on the grep regex: `\.\s*=\s*['\"\`]` matches `el.innerHTML = 'literal'` style writes.
+`element.innerHTML = element` style assignments (rare) are not matched, but our codebase has
+none (`git grep innerHTML index.html app.js` returns exit 1, i.e. zero occurrences anywhere).
+
+[verify 6] wider innerHTML audit (any occurrence anywhere)
+$ git grep -nE "innerHTML" index.html app.js
+(no output, exit 1 = zero occurrences)
+exit 1 (= OK)
+
+[verify 7] inline <script> blocks (should be 0 in index.html post-refactor)
+$ git grep -nE "<script[^>]*>" index.html
+index.html:180:  <script src="app.js"></script>
+exit 0
+Explanation: only the external <script src="app.js"> remains. All inline <script>...</script>
+was extracted to app.js so the strict CSP (script-src 'self') does not block any functionality.
+No 'unsafe-inline' is needed for script-src — the inline JS is gone, not nonce'd.
+
+[verify 8] inline event handlers (onclick=, on*=)
+$ git grep -nE "on(click|load|error|submit|change|input)=" index.html
+(no output, exit 1 = zero occurrences)
+exit 1 (= OK)
+Explanation: all onclick="" inline handlers were replaced by addEventListener bindings set up
+inside app.js's init() (bound after DOMContentLoaded).
+
+[verify 9] HTML stack-balance (per brief: html.parser structural check)
+$ python3 stack_check.py
+Unclosed: []
+Errors: []
+RESULT: OK
+exit 0
+
+==============================================================
+SUMMARY — all 9 verify checks passed (exit 0)
+==============================================================
+
+A11y changes (index.html)
+  - refresh button: added type="button", aria-label="刷新文章列表"
+  - status region: added role="status", aria-live="polite" so screen readers announce updates
+  - tab buttons: added type="button", role="tab", aria-selected, aria-controls
+  - tabs container: added role="tablist", aria-label
+  - articleList: added role="tabpanel", aria-live="polite"
+  - focus-visible: added explicit button:focus-visible / a:focus-visible outline so keyboard
+    navigation is clearly visible (does NOT disappear on Tab)
+  - showTab() now toggles aria-selected in sync with the .active class
+
+XSS hardening (index.html + app.js)
+  - extracted all inline <script> to app.js
+  - renderArticle → buildArticleElement: uses createElement + textContent for all user-derived
+    values (title, board, author, date, pushes, url). No innerHTML anywhere.
+  - All <a href> go through .href (URL setter), not innerHTML concatenation.
+  - Status text uses status.textContent = ... (not innerHTML).
+
+CSP / security headers (vercel.json — rewrites preserved untouched)
+  - Added headers section under source: "/(.*)".
+  - Content-Security-Policy:
+      default-src 'self';
+      script-src 'self';
+      style-src 'self' 'unsafe-inline';
+      img-src 'self' data:;
+      font-src 'self';
+      connect-src 'self';
+      object-src 'none';
+      base-uri 'self';
+      frame-ancestors 'none';
+      form-action 'self'
+  - X-Content-Type-Options: nosniff
+  - Referrer-Policy: strict-origin-when-cross-origin
+  - X-Frame-Options: DENY
+
+Style-source 'unsafe-inline' rationale (M5 follow-up): the inline <style> block lives in
+index.html for self-containment. Strictly removing it would require a separate .css file +
+adjusting the Vercel rewrites for /css/*, which crosses into devops territory and is out of
+scope for M2. Tracked as a known-issue follow-up for M5.
+
+Rewrites preserved (untouched):
+  [
+    { source: "/api/tracker", destination: "/api/tracker.js" },
+    { source: "/(.*)", destination: "/index.html" }
+  ]
+
+==============================================================
+ALL VERIFY CHECKS GREEN — ready to commit
+================================================================= REPLAY (M2 verify commands, fresh run) ===
+
+[1] node --check tracker.js api/tracker.js
+exit=0
+[2] node --check app.js
+exit=0
+[3] vercel.json parse + headers assert
+exit=0
+[4] innerHTML user-input grep on index.html
+exit=1
+[5] wider innerHTML audit (any file)
+exit=1
