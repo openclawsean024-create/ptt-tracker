@@ -11,5 +11,15 @@
                      "iPhone 15"
                  ],
     "min_heat":  1,
-    "interval_minutes":  5
+    "interval_minutes":  5,
+    "sources":  [
+                    "ptt",
+                    "dcard"
+                ],
+    "_sources_config_note":  "Optional.  Per-source toggles live in `sources_config`: { \"dcard\": { \"enabled\": true } }.  When `sources_config` is absent (round-1 config) every source defaults to enabled.  When the `sources` array itself is absent the orchestrator defaults to [\"ptt\"] — round-1 behaviour preserved.",
+    "sources_config":  {
+                           "dcard":  {
+                                        "enabled":  false
+                                    }
+                       }
 }

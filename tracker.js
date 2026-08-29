@@ -1,23 +1,44 @@
 #!/usr/bin/env node
 /**
- * PTT Tracker - Node.js Version
- * Real-time PTT keyword monitoring with Telegram notifications.
+ * PTT Tracker - Node.js Version (round-2 M1: MultiSourceTracker)
+ *
+ * Round-1 was PTT-only.  Round-2 M1 refactors the entrypoint into a
+ * ``MultiSourceTracker`` orchestrator: PTT-specific logic now lives in
+ * ``sources/ptt.js``; this file is just the dispatch + presentation
+ * layer that loops over the configured sources, normalizes their raw
+ * posts into unified Article objects, and (when Telegram is configured)
+ * fires notifications.
+ *
+ * Backwards-compatibility notes:
+ *   * ``node tracker.js`` and ``node tracker.js --watch N`` CLI flags are
+ *     preserved verbatim.
+ *   * ``read_articles.json`` semantics (hash-keyed dedup of "already seen"
+ *     articles) are unchanged.
+ *   * Telegram message format is byte-for-byte identical to round-1 —
+ *     existing subscribers see no diff.
+ *   * ``config.json`` without a ``sources`` field defaults to ``["ptt"]``,
+ *     so every existing deploy runs exactly what it ran in round-1.
+ *   * ``config.json`` with ``"sources": []`` short-circuits to "no new
+ *     articles" without contacting any platform.
+ *   * ``module.exports`` keeps ``run`` / ``checkBoards`` /
+ *     ``parseArticles`` / ``formatArticle`` so any downstream
+ *     importer (round-1 ``app.js`` etc.) keeps working — though the
+ *     37 pytest tests don't import any of these today.
  */
 
-const https = require('https');
 const fs = require('fs');
 const path = require('path');
 
+const { PttConnector } = require('./sources/ptt');
+const { resolveSources } = require('./sources/SourceConnector');
+
 const CONFIG_FILE = path.join(__dirname, 'config.json');
 const READ_FILE = path.join(__dirname, 'read_articles.json');
-const PTT_BASE_URL = 'https://www.ptt.cc';
-const DEFAULT_BOARDS = ['Gossiping', 'Tech_Job', 'Stock', 'AI', 'MobileComm', 'Food'];
-const DEFAULT_TIMEOUT_MS = 15000;
-const DEFAULT_RETRIES = 3;
+const DEFAULT_INTERVAL_MINUTES = 5;
 
-// Debug gate — non-emoji diagnostic console.log calls are routed through this
-// helper and only emit when DEBUG_PTT is set. Emoji-prefixed CLI output (the
-// user-facing progress banner) still goes straight to stdout.
+// Debug gate — non-emoji diagnostic console.log calls are routed through
+// this helper and only emit when DEBUG_PTT is set.  Emoji-prefixed CLI
+// output (the user-facing progress banner) still goes straight to stdout.
 const DEBUG_PTT = Boolean(process.env.DEBUG_PTT);
 function debugLog(...args) {
   if (DEBUG_PTT) console.log(...args);
@@ -26,10 +47,25 @@ function debugError(...args) {
   if (DEBUG_PTT) console.error(...args);
 }
 
+// ---------------------------------------------------------------------------
+// Connector registry — adding a new source is one entry here + one file in
+// sources/.  Round-3 will register ``ThreadsConnector`` / ``BahamutConnector``.
+// ---------------------------------------------------------------------------
+
+function buildConnectorRegistry() {
+  return {
+    ptt: () => new PttConnector({ debugLog }),
+    // dcard: () => new DcardConnector({ debugLog }),  // round-2 M2
+    // threads: () => new ThreadsConnector({ debugLog }),  // round-3+
+    // bahamut: () => new BahamutConnector({ debugLog }),  // round-3+
+  };
+}
+
 function loadConfig() {
-  // Non-secret config (boards / keywords / min_heat / interval_minutes) is read from config.json.
-  // Telegram secrets are read ONLY from environment variables — never from config.json
-  // (which would risk them being committed). See .env.example.
+  // Non-secret config (boards / keywords / min_heat / interval_minutes /
+  // sources) is read from config.json.  Telegram secrets are read ONLY
+  // from environment variables — never from config.json (which would risk
+  // them being committed).  See .env.example.
   let fileConfig = {};
   try {
     fileConfig = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
@@ -58,39 +94,12 @@ function saveReadArticles(data) {
 
 function getHash(str) {
   let hash = 0;
-  for (let i = 0; i < str.length; i += 1) {
+  for (let i = 0; str && i < str.length; i += 1) {
     const char = str.charCodeAt(i);
     hash = ((hash << 5) - hash) + char;
     hash |= 0;
   }
   return hash.toString();
-}
-
-function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-function decodeHtml(text = '') {
-  return text
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#039;/g, "'")
-    .replace(/&#x2F;/g, '/');
-}
-
-function stripTags(text = '') {
-  return decodeHtml(text.replace(/<[^>]+>/g, '')).trim();
-}
-
-function parsePushCount(raw = '') {
-  const value = raw.trim();
-  if (!value) return 0;
-  if (value === '爆') return 100;
-  if (value.startsWith('X')) return -10;
-  const parsed = Number.parseInt(value, 10);
-  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 function escapeHtml(text = '') {
@@ -100,7 +109,12 @@ function escapeHtml(text = '') {
     .replace(/>/g, '&gt;');
 }
 
-async function requestText({ hostname, path: requestPath, method = 'GET', headers = {}, body, timeoutMs = DEFAULT_TIMEOUT_MS }) {
+// ---------------------------------------------------------------------------
+// Telegram — kept verbatim from round-1 (format bytes preserved).
+// ---------------------------------------------------------------------------
+
+async function requestText({ hostname, path: requestPath, method = 'GET', headers = {}, body, timeoutMs = 15000 }) {
+  const https = require('https');
   return new Promise((resolve, reject) => {
     const req = https.request({ hostname, path: requestPath, method, headers }, (res) => {
       let data = '';
@@ -114,79 +128,11 @@ async function requestText({ hostname, path: requestPath, method = 'GET', header
         resolve(data);
       });
     });
-
     req.on('error', reject);
     req.setTimeout(timeoutMs, () => req.destroy(new Error('Timeout')));
     if (body) req.write(body);
     req.end();
   });
-}
-
-async function getBoardArticles(board, limit = 30, retries = DEFAULT_RETRIES) {
-  let lastError;
-
-  for (let attempt = 1; attempt <= retries; attempt += 1) {
-    try {
-      const html = await requestText({
-        hostname: 'www.ptt.cc',
-        path: `/bbs/${board}/index.html`,
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-          Cookie: 'over18=1',
-        },
-      });
-
-      return parseArticles(html, board).slice(0, limit);
-    } catch (error) {
-      lastError = error;
-      if (attempt < retries) {
-        await sleep(800 * attempt);
-      }
-    }
-  }
-
-  throw lastError;
-}
-
-function parseArticles(html, board) {
-  const articles = [];
-  const entries = html.split('<div class="r-ent">').slice(1);
-
-  for (const entry of entries) {
-    const titleMatch = entry.match(/<div class="title">([\s\S]*?)<\/div>/);
-    if (!titleMatch) continue;
-
-    const anchorMatch = titleMatch[1].match(/<a href="([^"]+)">([\s\S]*?)<\/a>/);
-    if (!anchorMatch) continue;
-
-    const href = anchorMatch[1].trim();
-    const title = stripTags(anchorMatch[2]);
-    if (!href || !title) continue;
-
-    const author = stripTags((entry.match(/<div class="author">([\s\S]*?)<\/div>/) || [])[1] || '未知');
-    const date = stripTags((entry.match(/<div class="date">([\s\S]*?)<\/div>/) || [])[1] || '');
-    const pushRaw = stripTags((entry.match(/<div class="nrec">([\s\S]*?)<\/div>/) || [])[1] || '');
-    const pushes = parsePushCount(pushRaw);
-
-    articles.push({
-      title,
-      href,
-      author,
-      date,
-      pushes,
-      heat: pushes,
-      board,
-      url: `${PTT_BASE_URL}${href}`,
-    });
-  }
-
-  return articles;
-}
-
-function matchKeywords(title, keywords) {
-  if (!keywords || keywords.length === 0) return false;
-  const titleLower = title.toLowerCase();
-  return keywords.some(keyword => titleLower.includes(String(keyword).toLowerCase()));
 }
 
 async function sendTelegram(message, config) {
@@ -256,42 +202,78 @@ function formatTelegramArticle(article) {
   ].join('\n');
 }
 
-async function checkBoards(config) {
-  const boards = config.boards || DEFAULT_BOARDS;
-  const keywords = config.keywords || [];
+// ---------------------------------------------------------------------------
+// MultiSourceTracker — instantiates the requested connectors, fans out
+// ``fetch`` over them, then normalizes + merges + dedups.  Mirrors the
+// round-1 ``checkBoards`` contract: returns ``{ newArticles, keywordMatches }``.
+// ---------------------------------------------------------------------------
+
+function matchKeywords(title, keywords) {
+  if (!keywords || keywords.length === 0) return false;
+  const titleLower = (title || '').toLowerCase();
+  return keywords.some(keyword => titleLower.includes(String(keyword).toLowerCase()));
+}
+
+async function checkSources(config) {
+  const sources = resolveSources(config);
   const minHeat = config.min_heat ?? 1;
+  const keywords = config.keywords || [];
   const readArticles = loadReadArticles();
   const newArticles = [];
   const keywordMatches = [];
+  const registry = buildConnectorRegistry();
 
-  console.log(`\n📋 Checking boards: ${boards.join(', ')}`);
+  console.log(`\n📋 Checking sources: ${sources.join(', ')}`);
+  if (sources.length === 0) {
+    return { newArticles, keywordMatches };
+  }
 
-  for (const board of boards) {
+  for (const name of sources) {
+    const factory = registry[name];
+    if (!factory) {
+      console.log(`  ⚠️  Unknown source '${name}' — skipping (registry: ${Object.keys(registry).join(', ')})`);
+      continue;
+    }
+    const connector = factory();
+    if (!connector.enabled) {
+      console.log(`  ⏭️  Source '${name}' is disabled — skipping`);
+      continue;
+    }
+
+    let rawPosts = [];
     try {
-      debugLog(`  Checking ${board}...`);
-      const articles = await getBoardArticles(board, 30);
-
-      for (const article of articles) {
-        const hash = getHash(`${article.board}|${article.title}|${article.date}`);
-        if (readArticles[hash]) continue;
-
-        readArticles[hash] = {
-          readAt: new Date().toISOString(),
-          title: article.title,
-          board: article.board,
-          url: article.url,
-        };
-
-        if (article.heat >= minHeat) {
-          newArticles.push(article);
-        }
-
-        if (matchKeywords(article.title, keywords)) {
-          keywordMatches.push(article);
-        }
-      }
+      // eslint-disable-next-line no-await-in-loop
+      rawPosts = await connector.fetch({ since: null, limit: 30, ctx: { config } });
     } catch (error) {
-      console.log(`  ❌ Error checking ${board}: ${error.message}`);
+      console.log(`  ❌ Error fetching '${name}': ${error && error.message ? error.message : error}`);
+      rawPosts = [];
+    }
+
+    for (const raw of rawPosts) {
+      let article;
+      try {
+        article = connector.normalize(raw, { config });
+      } catch (error) {
+        debugLog(`[normalize] ${name} dropped a post: ${error && error.message ? error.message : error}`);
+        continue;
+      }
+
+      const hash = getHash(`${article.board}|${article.title}|${article.date || article.timestamp}`);
+      if (readArticles[hash]) continue;
+
+      readArticles[hash] = {
+        readAt: new Date().toISOString(),
+        title: article.title,
+        board: article.board,
+        url: article.url,
+      };
+
+      if (article.pushes >= minHeat) {
+        newArticles.push(article);
+      }
+      if (matchKeywords(article.title, keywords)) {
+        keywordMatches.push(article);
+      }
     }
   }
 
@@ -299,16 +281,26 @@ async function checkBoards(config) {
   return { newArticles, keywordMatches };
 }
 
+// ---------------------------------------------------------------------------
+// ``checkBoards`` is preserved as an alias of ``checkSources`` so any
+// downstream importer of the round-1 API surface still works.
+// ---------------------------------------------------------------------------
+
+async function checkBoards(config) {
+  return checkSources(config);
+}
+
 async function run(config) {
   console.log('==================================================');
   console.log('🤖 PTT Tracker Started');
   console.log('==================================================');
-  console.log(`📌 Boards: ${(config.boards || DEFAULT_BOARDS).join(', ')}`);
+  console.log(`📌 Sources: ${resolveSources(config).join(', ')}`);
+  console.log(`📌 Boards: ${(config.boards || []).join(', ') || '(source defaults)'}`);
   console.log(`🔑 Keywords: ${(config.keywords || []).join(', ') || 'None'}`);
   console.log(`🔥 Min Heat: ${config.min_heat ?? 1}`);
   debugLog('--------------------------------------------------');
 
-  const { newArticles, keywordMatches } = await checkBoards(config);
+  const { newArticles, keywordMatches } = await checkSources(config);
 
   if (keywordMatches.length > 0) {
     console.log('\n🎯 KEYWORD MATCHES:');
@@ -344,7 +336,7 @@ async function main() {
   const config = loadConfig();
 
   if (args[0] === '--watch' || args[0] === '-w') {
-    const interval = Number.parseInt(args[1], 10) || config.interval_minutes || 5;
+    const interval = Number.parseInt(args[1], 10) || config.interval_minutes || DEFAULT_INTERVAL_MINUTES;
     console.log(`\n👀 Watch mode: checking every ${interval} minutes`);
     console.log('Press Ctrl+C to stop\n');
 
@@ -372,4 +364,13 @@ if (require.main === module) {
   });
 }
 
-module.exports = { run, checkBoards, parseArticles, formatArticle };
+module.exports = {
+  run,
+  checkBoards,
+  // Backwards-compat exports — round-1 callers that imported these helpers
+  // directly (none of the 37 pytest tests do, but ``app.js`` style
+  // consumers might).  Re-exported from ``sources/ptt.js`` so the legacy
+  // surface still works.
+  formatArticle,
+  parseArticles: require('./sources/ptt').parseArticles,
+};

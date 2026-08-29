@@ -1,0 +1,46 @@
+=== rpb-backend-m1-verify.log — generated 2026-08-29T15:31:27Z ===
+
+## [1/4] node --check (4 files)
+  tracker.js: OK
+  api/tracker.js: OK
+  sources/SourceConnector.js: OK
+  sources/ptt.js: OK
+  exit: 0
+
+## [2/4] python3 -m compileall .
+  exit: 0
+
+## [3/4] python3 -m pytest -q
+.....................................                                    [100%]
+=============================== warnings summary ===============================
+../../../../../Library/Python/3.9/lib/python/site-packages/urllib3/__init__.py:35
+  /Users/sean/Library/Python/3.9/lib/python/site-packages/urllib3/__init__.py:35: NotOpenSSLWarning: urllib3 v2 only supports OpenSSL 1.1.1+, currently the 'ssl' module is compiled with 'LibreSSL 2.8.3'. See: https://github.com/urllib3/urllib3/issues/3020
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+37 passed, 1 warning in 0.10s
+  exit: 0
+
+## [4/4] JS smoke — interface contract + parseArticles equivalence
+  ✓ SourceConnector class
+  ✓ isSourceEnabled exported
+  ✓ resolveSources exported
+  ✓ connector.name === ptt
+  ✓ connector.enabled default true
+  ✓ healthcheck() returns {ok:true}
+  ✓ resolveSources({}) defaults to [ptt]
+  ✓ resolveSources({sources:[]}) === []
+  ✓ resolveSources({sources:["ptt","dcard"]}) preserves order
+  ✓ isSourceEnabled default true when no map
+  ✓ isSourceEnabled honors map=false
+  ✓ isSourceEnabled honors map=true
+  ✓ parseArticles extracts title
+  ✓ parseArticles extracts pushes (爆→100)
+  ✓ parseArticles includes heat alias
+  ✓ parseArticles preserves board
+  ✓ normalize has all 7 required keys
+  ✓ normalize source === ptt
+  ✓ normalize timestamp is ISO
+  ✓ normalize preserves legacy heat/date/href
+  --- 20 checks, 0 failed
+  exit: 0
