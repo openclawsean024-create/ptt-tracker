@@ -1,0 +1,42 @@
+=== rpb-devops-verify.log — Milestone 3 (DevOps CI scaffold) ===
+date: 2026-08-29T14:08:42Z
+branch: rpb/round-1-productionize
+
+--- [1] YAML parse: .github/workflows/ci.yml ---
+ci.yml parse OK
+exit=0
+
+--- [2] JSON parse: package.json ---
+package.json parse OK; engines= {'node': '>=18'}
+exit=0
+
+--- [3] structural sanity: jobs / triggers / pinned actions ---
+name: ci
+on: {'push': {'branches': ['main']}, 'pull_request': {'branches': ['main']}}
+permissions: read-all
+jobs: ['syntax-check', 'tests', 'security-audit']
+  syntax-check: runs-on=ubuntu-latest needs=None continue-on-error=False
+  tests: runs-on=ubuntu-latest needs=syntax-check continue-on-error=False
+  security-audit: runs-on=ubuntu-latest needs=syntax-check continue-on-error=True
+actions used: ['actions/checkout@v4', 'actions/setup-python@v5']
+all actions pinned to major tags: OK
+exit=0
+
+--- [4] secret-leak grep in workflow yaml ---
+no hardcoded secrets: OK
+
+--- [5] repo syntax gates run locally (same commands as CI) ---
+node --check OK
+exit=0
+
+--- [6] scope check: untouched files ---
+ M api/tracker.js
+ M config.example.json
+ M config.json
+ M index.html
+ M ptt_tracker.py
+ M tracker.js
+ M vercel.json
+?? .github/
+?? package.json
+?? rpb-devops-verify.log
