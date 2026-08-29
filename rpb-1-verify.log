@@ -1,0 +1,59 @@
+=== rpb-1-verify.log — round-1 consolidated (post M1+M4) ===
+date: 2026-08-29T14:14:57Z
+branch: rpb/round-1-productionize
+HEAD: cf6524dc39a33df55d1d36bb8094bf1cf1991f54
+log:
+cf6524d rpb(qa): add pytest scaffold + 3 smoke suites (config, keyword, heat)
+3bd80a6 rpb(backend): env-only secrets, gitignore config.json, drop telegram fields from tracked config
+801c211 rpb(frontend): M2 frontend polish + CSP via vercel.json
+b7dd063 rpb(devops): add CI workflow scaffold + minimal package.json engines
+8562fa8 rpb(orchestrator): add round-1 PLAN (5 milestones, v2.x productionization)
+bd0ea76 chore(prd): sweet-spot-driven rewrite — ptt-tracker
+
+==========================================
+[1] python3 -m pytest -q
+.....................................                                    [100%]
+=============================== warnings summary ===============================
+../../../../../Library/Python/3.9/lib/python/site-packages/urllib3/__init__.py:35
+  /Users/sean/Library/Python/3.9/lib/python/site-packages/urllib3/__init__.py:35: NotOpenSSLWarning: urllib3 v2 only supports OpenSSL 1.1.1+, currently the 'ssl' module is compiled with 'LibreSSL 2.8.3'. See: https://github.com/urllib3/urllib3/issues/3020
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+37 passed, 1 warning in 0.12s
+pytest exit: 0
+
+==========================================
+[2] python3 -m compileall .
+Listing './.pytest_cache/v'...
+Listing './.pytest_cache/v/cache'...
+Listing './PRD'...
+Listing './api'...
+Listing './tests'...
+compileall exit: 0
+
+==========================================
+[3] node --check tracker.js api/tracker.js
+node check exit: 0
+
+==========================================
+[4] secret-leak grep (telegram/chatid tokens)
+ptt_tracker.py:269:        'telegram_chat_id': os.environ.get('PTT_TELEGRAM_CHAT_ID'),
+tests/_pure_mirrors.py:73:        "telegram_chat_id": env.get("PTT_TELEGRAM_CHAT_ID"),
+secret-grep exit: 0
+
+==========================================
+[5] .env.example is tracked + .env* gitignore OK
+.env.example
+.gitignore:14:.env	.env
+
+==========================================
+[6] config.json untracked
+.gitignore:13:config.json	config.json
+
+==========================================
+[7] TODO / FIXME / HACK scan
+PLAN.md:65:  - `git grep -E "(TODO|FIXME|HACK)" | grep -v vendor/` 應為空(或只有 docs 的 `TODO(planned)` 之類)
+rpb-qa-verify.log:101:TODO/FIXME/HACK grep in tests/ pytest.ini (production code excluded by design):
+
+==========================================
+FINAL SUMMARY
