@@ -30,6 +30,7 @@ const fs = require('fs');
 const path = require('path');
 
 const { PttConnector } = require('./sources/ptt');
+const { DcardConnector } = require('./sources/dcard');
 const { resolveSources } = require('./sources/SourceConnector');
 
 const CONFIG_FILE = path.join(__dirname, 'config.json');
@@ -55,7 +56,7 @@ function debugError(...args) {
 function buildConnectorRegistry() {
   return {
     ptt: () => new PttConnector({ debugLog }),
-    // dcard: () => new DcardConnector({ debugLog }),  // round-2 M2
+    dcard: () => new DcardConnector({ debugLog }),
     // threads: () => new ThreadsConnector({ debugLog }),  // round-3+
     // bahamut: () => new BahamutConnector({ debugLog }),  // round-3+
   };
