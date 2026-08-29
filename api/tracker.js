@@ -8,6 +8,31 @@ const READ_FILE = path.join(__dirname, '..', 'read_articles.json');
 const DEFAULT_BOARDS = ['MacShop'];
 const DEFAULT_TIMEOUT_MS = 15000;
 
+// Hardened defaults — production-grade CORS (no wildcard) and a shared-secret
+// gate that protects the side-effectful "scrape PTT and (when configured) send
+// Telegram" endpoint from being triggered by anyone on the public internet.
+// Both controls are env-driven and degrade to safe defaults:
+//
+//   - ALLOWED_ORIGIN : exact origin echoed back in Access-Control-Allow-Origin.
+//                      Defaults to the production frontend deploy URL when unset.
+//   - PTT_API_KEY     : when set, requests MUST send matching `X-PTT-API-Key`
+//                      header. When unset, the gate is disabled (open access
+//                      is acceptable for a demo deploy, but operators are
+//                      strongly encouraged to set both env vars together —
+//                      see SECURITY.md).
+const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || 'https://ptt-alertor-olive.vercel.app';
+const PTT_API_KEY = process.env.PTT_API_KEY || '';
+// Diagnostic noise (server-side) is suppressed unless DEBUG_PTT is set, to
+// keep serverless logs uncluttered.
+const DEBUG_PTT = Boolean(process.env.DEBUG_PTT);
+function debugError(...args) {
+  if (DEBUG_PTT) console.error(...args);
+}
+
+function unauthorized(res) {
+  return res.status(401).json({ success: false, error: 'unauthorized' });
+}
+
 function loadConfig() {
   // Non-secret config (boards / keywords / min_heat / interval_minutes) is read from config.json.
   // Telegram secrets are read ONLY from environment variables — never from config.json
@@ -127,20 +152,34 @@ async function checkBoards(config) {
         if (matchKeywords(article.title, keywords)) keywordMatches.push(article);
       }
     } catch (error) {
-      console.error(`Error checking ${board}: ${error.message}`);
+      debugError(`[api/tracker] Error checking ${board}: ${error && error.message ? error.message : error}`);
     }
   }
   return { newArticles, keywordMatches };
 }
 
 module.exports = async (req, res) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
+  // Strict same-origin (or operator-pinned) CORS — never wildcard on a
+  // public endpoint that triggers side-effectful scraping + optional
+  // Telegram notifications.
+  res.setHeader('Access-Control-Allow-Origin', ALLOWED_ORIGIN);
+  res.setHeader('Vary', 'Origin');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-PTT-API-Key');
   res.setHeader('Content-Type', 'application/json');
 
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
+  }
+
+  // Shared-secret gate — when PTT_API_KEY is configured, refuse callers that
+  // do not present the matching header. When unset, the gate is open (a
+  // demo-deploy posture) — see SECURITY.md for the recommended paired setup.
+  if (PTT_API_KEY) {
+    const presented = (req.headers && (req.headers['x-ptt-api-key'] || req.headers['X-PTT-API-Key'])) || '';
+    if (!presented || presented !== PTT_API_KEY) {
+      return unauthorized(res);
+    }
   }
 
   try {
@@ -154,6 +193,7 @@ module.exports = async (req, res) => {
       hotArticles: (result.newArticles || []).sort((a, b) => b.pushes - a.pushes).slice(0, 20),
     });
   } catch (error) {
+    debugError(`[api/tracker] top-level error: ${error && error.message ? error.message : error}`);
     return res.status(500).json({
       success: false,
       error: error.message,

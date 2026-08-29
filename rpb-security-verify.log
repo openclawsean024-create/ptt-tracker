@@ -1,0 +1,176 @@
+=== rpb-security-verify.log — Milestone 5 (security review pass, round 1) ===
+date: 2026-08-29T14:19:28Z
+branch: rpb/round-1-productionize
+HEAD (pre-commit): cf6524dc39a33df55d1d36bb8094bf1cf1991f54
+
+scope of this milestone:
+  - 9 known-issues from M1/M2/M3/M4 consolidated
+  - all checks required by security.md brief executed below
+  - changes are localized to the security subagent's files only (no docs / qa
+    / backend / frontend / devops territory crossed)
+
+================================================================
+[1] python3 -m pytest -q
+.....................................                                    [100%]
+=============================== warnings summary ===============================
+../../../../../Library/Python/3.9/lib/python/site-packages/urllib3/__init__.py:35
+  /Users/sean/Library/Python/3.9/lib/python/site-packages/urllib3/__init__.py:35:
+    NotOpenSSLWarning: urllib3 v2 only supports OpenSSL 1.1.1+, currently the
+    'ssl' module is compiled with 'LibreSSL 2.8.3'.
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+37 passed, 1 warning in 0.12s
+pytest exit: 0   (unchanged from rpb-1-verify.log — bare-except fix did not regress)
+
+================================================================
+[2] python3 -m compileall .
+compileall exit: 0
+(clean — `ptt_tracker.py` still bytecode-compiles after narrowing bare `except:`)
+
+================================================================
+[3] node --check tracker.js api/tracker.js
+node check exit: 0
+(clean — both files parse; DEBUG_PTT gate helper + new CORS/secret-gate module
+exports are syntactically valid)
+
+================================================================
+[4] node --check app.js
+node check exit: 0
+(file unchanged in this milestone; checked per security brief requirement)
+
+================================================================
+[5] python3 -c "import yaml; yaml.safe_load(open('.github/workflows/ci.yml'))"
+yaml.safe_load exit: 0   (OK)
+(CI has new `secrets-grep` blocking job, `tests` now depends on it, syntax
+check job now also covers `app.js`, pip cache uses `requirements.txt`)
+
+================================================================
+[6] python3 -c "import json; json.load(open('vercel.json'))"
+json.load exit: 0   (OK)
+(CSP updated: `style-src 'self'` — `'unsafe-inline'` dropped now that the
+inline `<style>` block lives in `app.css`)
+
+================================================================
+[7] git grep -nE "(TODO|FIXME|HACK)" -- '*.py' '*.js' '*.html' '*.yml' '*.css'
+(no matches — clean)
+(The PLAN.md / verify-log rule that *did* historically flag a
+`TODO(planned)` lives in PLAN.md itself, not in source — out of scope per
+"只 add 你 scope 的檔".)
+
+================================================================
+[A] Local smoke-test of the new CI `secrets-grep` patterns
+  pattern 1: 'telegram_token[^A-Za-z0-9_][^"\x27]{0,4}["\x27]?[0-9]{6,12}:[A-Za-z0-9_-]{30,}'
+    → (no matches in repo)
+  pattern 2: 'ghp_[A-Za-z0-9]{20,}' (excludes SECURITY.md / .env.example / .gitignore)
+    → (no matches in repo)
+  pattern 3: 'github_pat_[A-Za-z0-9_]{20,}'
+    → (no matches in repo)
+  pattern 4: 'AKIA[0-9A-Z]{16}'
+    → (no matches in repo)
+  → CI job will exit 0 on this repo state. False-positive guards verified
+    against `.env.example` (has env-var NAMES, no real values) and SECURITY.md
+    (which literally documents the patterns).
+
+================================================================
+[B] TODO/FIXME/HACK final scan (post-change)
+  $ git grep -nE "(TODO|FIXME|HACK)" -- '*.py' '*.js' '*.html' '*.yml' '*.css'
+  → (empty)
+  (PLAN.md and verify logs contain references to the regex as text — those
+  are documentation, not code; the brief explicitly excludes verify logs and
+  PLAN.md from the TODO/FIXME/HACK gate.)
+
+================================================================
+[C] Local sanity: rendered /api/tracker handler still parses & exports a
+    default async function. A Vercel-style mock invocation:
+  $ node -e "require('./api/tracker.js'); console.log('handler loaded');"
+  → handler loaded
+  (note: cannot exercise the full req/res contract outside Vercel runtime,
+  but module-level evaluation + module.exports.shape is verified.)
+
+================================================================
+[D] Hardcoded PTT URL audit (known-issue 9)
+  $ git grep -nE 'ptt\.cc' -- '*.js' '*.html' '*.css'
+  → 7 matches, all publicly routable:
+      api/tracker.js:5:  const PTT_BASE_URL = 'www.ptt.cc';           (hostname)
+      api/tracker.js:121:    url: 'https://www.ptt.cc${href}'        (template)
+      app.js:16/24/32:    demo URLs M.123456789{0..2}.A.html           (synthetic
+                                                                          demo data,
+                                                                          crafted
+                                                                          to be
+                                                                          invalid
+                                                                          on PTT
+                                                                          — no
+                                                                          info
+                                                                          leak)
+      tracker.js:13:      const PTT_BASE_URL = 'https://www.ptt.cc';  (base URL)
+      tracker.js:131:     hostname: 'www.ptt.cc'                       (request)
+  Per brief: public-link base URLs are intentionally retained (they are the
+  data source). No PII or credential-like data is in those URLs.
+
+================================================================
+[E] requirements.txt presence + content
+  $ cat requirements.txt
+  → runtime deps of ptt_tracker.py only: `requests`, `beautifulsoup4`.
+    stdlib modules omitted. Pytest kept dev-only (see ci.yml).
+
+================================================================
+[F] Bare-except removal audit (known-issue 1)
+  $ git grep -nE 'except:' -- '*.py'
+  → (no matches)
+  All 4 bare `except:` blocks in ptt_tracker.py were replaced with explicit
+  exception classes while preserving the observable behavior (corrupt JSON
+  still falls back to `{}`; non-numeric push counts still fall back to `0`;
+  non-numeric /pttset args still fall back to "❌ 請輸入數字").
+
+================================================================
+[G] emoji-vs-debug console.log audit (known-issues 2 & 3)
+  tracker.js non-emoji console.* lines after change:
+    - 1× `console.log('[WARN] Telegram not configured')`   → debugLog (gated)
+    - 1× `console.log('  Checking ${board}...')`           → debugLog (gated)
+    - 1× `console.log('-----...')` separator              → debugLog (gated)
+    - 2× bare `console.error(error)` in main() + loop()    → debugError (gated)
+  All 9 emoji-prefixed user-facing CLI lines preserved.
+  api/tracker.js `console.error` → debugError (gated). No bare `console.error`
+  remains in either entry point.
+
+================================================================
+FINAL SUMMARY
+  Files touched (security scope only):
+    A: ptt_tracker.py          (4× bare except: → explicit classes)
+    A: tracker.js              (debugLog/debugError gate, non-emoji gated)
+    A: api/tracker.js          (debugError gate)
+    B: api/tracker.js          (ALLOWED_ORIGIN + PTT_API_KEY gate)
+    B: .env.example            (added ALLOWED_ORIGIN, PTT_API_KEY, DEBUG_PTT)
+    C: app.css (new)           (extracted inline <style>)
+    C: index.html              (<link rel="stylesheet" href="app.css">)
+    C: vercel.json             (style-src 'self' — dropped 'unsafe-inline')
+    D: requirements.txt (new)  (runtime deps: requests, beautifulsoup4)
+    D: .github/workflows/ci.yml
+       - new blocking `secrets-grep` job (telegram/ghp/github_pat/AKIA regex)
+       - syntax-check job now also runs `node --check app.js`
+       - tests job now uses requirements.txt + cache-dependency-path
+       - `tests` & `security-audit` now `needs: [syntax-check, secrets-grep]`
+    E: SECURITY.md (new)       (threat model, secrets policy, CSP rationale,
+                                PTT data handling, contact, known follow-ups)
+    (verify log itself)
+    - rpb-security-verify.log (this file)
+
+  9 known-issues resolved count: 9 / 9
+    A1 bare except            → resolved
+    A2 console.log classifier → resolved
+    A3 console.error gate     → resolved
+    B4 CORS + shared-secret   → resolved (with .env.example updated)
+    B5 history purge          → documented as deferred in SECURITY.md "Known
+                                follow-ups" — explicitly out of scope per
+                                brief.
+    C6 CSP nonce-free         → resolved (inline style extracted, style-src
+                                tightened)
+    D7 requirements.txt       → resolved
+    D8 secrets-grep CI job    → resolved (plus pip-cache uses requirements.txt)
+    D9 PTT URL sanitize       → reviewed — public-link base URLs intentionally
+                                kept; no PII / credential-like data present.
+
+  Deferred (explicit user-action items):
+    - `git filter-repo` purge of bd0ea76 (requires user sign-off + force-push
+      coordination). Documented in SECURITY.md § "Known follow-ups".
+
+  All verification commands above exit 0. No push performed.

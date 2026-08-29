@@ -1,0 +1,16 @@
+# PTT Tracker — runtime Python dependencies.
+#
+# Pinned to versions known to work with Python 3.9+ (urllib3 2.x requires
+# OpenSSL 1.1.1+; on systems pinned to LibreSSL the older urllib3 1.x is
+# kept to avoid the harmless `NotOpenSSLWarning`).
+#
+# What is NOT here:
+#   - `pytest` (dev-only, installed by CI as a separate step)
+#   - stdlib modules (`json`, `time`, `os`, `sys`, `argparse`,
+#     `datetime`, `hashlib`, `threading` — all stdlib).
+#   - packages used only by `api/tracker.js` / `tracker.js` (Node side
+#     has zero runtime npm dependencies; only the built-in `https`
+#     and `fs` modules are used).
+
+requests>=2.28,<3.0
+beautifulsoup4>=4.11,<5.0

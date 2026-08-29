@@ -15,6 +15,17 @@ const DEFAULT_BOARDS = ['Gossiping', 'Tech_Job', 'Stock', 'AI', 'MobileComm', 'F
 const DEFAULT_TIMEOUT_MS = 15000;
 const DEFAULT_RETRIES = 3;
 
+// Debug gate — non-emoji diagnostic console.log calls are routed through this
+// helper and only emit when DEBUG_PTT is set. Emoji-prefixed CLI output (the
+// user-facing progress banner) still goes straight to stdout.
+const DEBUG_PTT = Boolean(process.env.DEBUG_PTT);
+function debugLog(...args) {
+  if (DEBUG_PTT) console.log(...args);
+}
+function debugError(...args) {
+  if (DEBUG_PTT) console.error(...args);
+}
+
 function loadConfig() {
   // Non-secret config (boards / keywords / min_heat / interval_minutes) is read from config.json.
   // Telegram secrets are read ONLY from environment variables — never from config.json
@@ -181,7 +192,7 @@ function matchKeywords(title, keywords) {
 async function sendTelegram(message, config) {
   const { telegram_token, telegram_chat_id } = config;
   if (!telegram_token || !telegram_chat_id) {
-    console.log('[WARN] Telegram not configured');
+    debugLog('[WARN] Telegram not configured');
     return false;
   }
 
@@ -257,7 +268,7 @@ async function checkBoards(config) {
 
   for (const board of boards) {
     try {
-      console.log(`  Checking ${board}...`);
+      debugLog(`  Checking ${board}...`);
       const articles = await getBoardArticles(board, 30);
 
       for (const article of articles) {
@@ -295,7 +306,7 @@ async function run(config) {
   console.log(`📌 Boards: ${(config.boards || DEFAULT_BOARDS).join(', ')}`);
   console.log(`🔑 Keywords: ${(config.keywords || []).join(', ') || 'None'}`);
   console.log(`🔥 Min Heat: ${config.min_heat ?? 1}`);
-  console.log('--------------------------------------------------');
+  debugLog('--------------------------------------------------');
 
   const { newArticles, keywordMatches } = await checkBoards(config);
 
@@ -341,7 +352,7 @@ async function main() {
       try {
         await run(config);
       } catch (error) {
-        console.error(error);
+        debugError(`[loop] ${error && error.message ? error.message : error}`);
       }
       console.log(`\n⏳ Sleeping for ${interval} minutes...`);
       setTimeout(loop, interval * 60 * 1000);
@@ -356,7 +367,7 @@ async function main() {
 
 if (require.main === module) {
   main().catch((error) => {
-    console.error(error);
+    debugError(`[main] ${error && error.message ? error.message : error}`);
     process.exitCode = 1;
   });
 }

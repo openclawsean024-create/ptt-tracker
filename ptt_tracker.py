@@ -65,7 +65,7 @@ class PTTTracker:
             try:
                 with open(self.read_file, 'r', encoding='utf-8') as f:
                     return json.load(f)
-            except:
+            except (OSError, json.JSONDecodeError):
                 return {}
         return {}
     
@@ -133,7 +133,7 @@ class PTTTracker:
                     pushes = push_elem.get_text(strip=True) if push_elem else "0"
                     try:
                         pushes = int(pushes)
-                    except:
+                    except ValueError:
                         pushes = 0
                     
                     # 計算熱度
@@ -253,7 +253,7 @@ def load_config():
         try:
             with open(config_file, 'r', encoding='utf-8') as f:
                 return json.load(f)
-        except:
+        except (OSError, json.JSONDecodeError):
             pass
 
     return {}
@@ -386,7 +386,7 @@ def handle_telegram_command(update):
                 config['min_heat'] = heat
                 save_config(config)
                 response = f"✅ 已設定熱度閾值：{heat}"
-            except:
+            except ValueError:
                 response = "❌ 請輸入數字"
     
     elif command == '/pttnow' or command == '/pttnow@ptt_tracker_bot':
