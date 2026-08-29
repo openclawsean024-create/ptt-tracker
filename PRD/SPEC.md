@@ -793,3 +793,45 @@ model Notification {
 > 對應 Notion：https://www.notion.so/PTT-追蹤器-329449ca65d88190b4d8f7c30f25d5bf
 > PRD 規格分數（新）：9.2
 > 商業化分數（新）：(9.2 × 0.3 + 5 × 0.7) × 10 = 62.6 ≈ 63
+
+---
+
+## 附錄 A — round-1 實作紀錄(2026-08-29)
+
+> 本附錄由 `rpb(docs)` 在 round-1 productionization 結束時新增,**不修改 §1-§15 的 scope 章節**。僅作為「實際做了哪些事」的實作紀錄。
+
+### A.1 round-1 範圍
+
+本輪(round-1,`v2.x productionization`)對應 **v2.x PTT-only 範圍的 production hardening**,並**不**啟動 v3.0「中文社群即時雷達」的 scope。
+
+實作聚焦在五個層面:
+
+1. **Backend hardening + secrets hygiene** — `tracker.js` / `ptt_tracker.py` / `api/tracker.js` 改為純環境變數讀取 Telegram 憑證;`config.json` 不再帶 secrets;`.gitignore` 排除 `config.json` / `.env` / `*.pem`;新增 `.env.example`。
+2. **Frontend polish + CSP via vercel.json** — inline `<script>` 抽到 `app.js`,strict CSP `script-src 'self'`,所有 `renderArticle` 寫入改走 `createElement + textContent`,加 `role` / `aria-*` / `:focus-visible`。
+3. **DevOps CI scaffold** — `.github/workflows/ci.yml` 三個 job:`syntax-check`(最便宜 gate)、`tests`(`pytest -q`)、`security-audit`(`pip-audit` + `npm audit`,advisory only);`package.json` minimal engines。
+4. **QA test scaffold** — `tests/` pytest scaffold,37 個 smoke tests,透過 `tests/_pure_mirrors.py` 鏡像 `tracker.js` 的純函式。
+5. **Security review + Docs sync**(本附錄 + `SECURITY.md` + `CHANGELOG.md` + README 改寫)。
+
+完整 milestone 規劃見 repo root 的 [`PLAN.md`](../PLAN.md)。
+
+### A.2 round-1 commit log(HEAD 為主)
+
+```
+6222370 rpb(orchestrator): round-1 consolidated verify (pytest 37/37, compileall, node --check, secrets clean)
+cf6524d rpb(qa): add pytest scaffold + 3 smoke suites (config, keyword, heat)
+3bd80a6 rpb(backend): env-only secrets, gitignore config.json, drop telegram fields from tracked config
+801c211 rpb(frontend): M2 frontend polish + CSP via vercel.json
+b7dd063 rpb(devops): add CI workflow scaffold + minimal package.json engines
+8562fa8 rpb(orchestrator): add round-1 PLAN (5 milestones, v2.x productionization)
+bd0ea76 chore(prd): sweet-spot-driven rewrite — ptt-tracker
+```
+
+(由 `git log --oneline -10` 取得;rpb(security) 與 rpb(docs) 在本附錄建立時為 in-flight work。)
+
+### A.3 v3.0 多平台擴展不在 round-1 範圍
+
+**v3.0「中文社群即時雷達」(PTT + Dcard + Threads + 巴哈姆特 + AI 情緒 + 一鍵轉傳同溫層)在 round-1 中完全沒動**,仍停留在 §1-§15 的規劃階段。
+
+v3.0 的 follow-up goal 草稿已存放在 `prompts/ptt-tracker/follow-up-v3.0.md`(**不**進 repo),列出啟動 v3.0 前的 hard prerequisites(包括 v2.x round 必須先完成的測試覆蓋、secrets hygiene、CSP / CORS 控制、CI 綠燈等)。
+
+啟動 v3.0 前,必須由 user 明確同意後由 orchestrator 評估並 `create_goal`,**不會**由本輪自動接續。
