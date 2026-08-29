@@ -1,0 +1,98 @@
+===============================================
+=== Round-1 FINAL verify (after M5 commits) ===
+===============================================
+date: 2026-08-29T14:20:57Z
+branch: rpb/round-1-productionize
+HEAD: 09881900a7408ed4028e64549cc6ede81e307d8a
+
+=== full commit log ===
+0988190 rpb(security): M5 hardening + CSP nonce-free + secrets-grep CI
+5e3cb99 rpb(docs): M5 docs sync — README env-only default, CHANGELOG round-1, PRD 附錄 A
+6222370 rpb(orchestrator): round-1 consolidated verify (pytest 37/37, compileall, node --check, secrets clean)
+cf6524d rpb(qa): add pytest scaffold + 3 smoke suites (config, keyword, heat)
+3bd80a6 rpb(backend): env-only secrets, gitignore config.json, drop telegram fields from tracked config
+801c211 rpb(frontend): M2 frontend polish + CSP via vercel.json
+b7dd063 rpb(devops): add CI workflow scaffold + minimal package.json engines
+8562fa8 rpb(orchestrator): add round-1 PLAN (5 milestones, v2.x productionization)
+bd0ea76 chore(prd): sweet-spot-driven rewrite — ptt-tracker
+
+===========================================
+[F1] python3 -m pytest -q (success criteria #1a)
+.....................................                                    [100%]
+=============================== warnings summary ===============================
+../../../../../Library/Python/3.9/lib/python/site-packages/urllib3/__init__.py:35
+  /Users/sean/Library/Python/3.9/lib/python/site-packages/urllib3/__init__.py:35: NotOpenSSLWarning: urllib3 v2 only supports OpenSSL 1.1.1+, currently the 'ssl' module is compiled with 'LibreSSL 2.8.3'. See: https://github.com/urllib3/urllib3/issues/3020
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+37 passed, 1 warning in 0.10s
+exit: 0
+
+===========================================
+[F2] python3 -m compileall . (success criteria #1b)
+Listing './PRD'...
+Listing './api'...
+Listing './tests'...
+exit: 0
+
+===========================================
+[F3] node --check tracker.js api/tracker.js app.js (success criteria #1c)
+  tracker.js exit: 0
+  api/tracker.js exit: 0
+  app.js exit: 0
+
+===========================================
+[F4] secret leak grep — no real tokens, only env-var reads
+ptt_tracker.py:269:        'telegram_chat_id': os.environ.get('PTT_TELEGRAM_CHAT_ID'),
+rpb-1-verify.log:40:ptt_tracker.py:269:        'telegram_chat_id': os.environ.get('PTT_TELEGRAM_CHAT_ID'),
+rpb-1-verify.log:41:tests/_pure_mirrors.py:73:        "telegram_chat_id": env.get("PTT_TELEGRAM_CHAT_ID"),
+tests/_pure_mirrors.py:73:        "telegram_chat_id": env.get("PTT_TELEGRAM_CHAT_ID"),
+(no sk-/ghp-/AWS/leaked PAT matches)
+
+===========================================
+[F5] config.json untracked + .env.example tracked + .env* gitignored
+config.json state:
+.gitignore:13:config.json	config.json
+.env.example state (should be tracked):
+.env.example
+.env file (should be gitignored):
+.gitignore:14:.env	.env
+
+===========================================
+[F6] bare except + print + console.log noise scan
+bare 'except:' in production code (security said 0 remaining):
+(none)
+
+console.log calls in production JS:
+tracker.js:18:// Debug gate — non-emoji diagnostic console.log calls are routed through this
+tracker.js:23:  if (DEBUG_PTT) console.log(...args);
+tracker.js:220:      console.log('✅ Telegram notification sent');
+tracker.js:224:    console.log(`❌ Telegram error: ${result.description || 'unknown error'}`);
+tracker.js:227:    console.log(`❌ Telegram error: ${error.message}`);
+tracker.js:267:  console.log(`\n📋 Checking boards: ${boards.join(', ')}`);
+tracker.js:294:      console.log(`  ❌ Error checking ${board}: ${error.message}`);
+tracker.js:303:  console.log('==================================================');
+tracker.js:304:  console.log('🤖 PTT Tracker Started');
+tracker.js:305:  console.log('==================================================');
+
+TODO/FIXME/HACK in production code (success criteria #5):
+
+===========================================
+[F7] CI infra parse-check
+ci.yml OK
+vercel.json OK, rewrites=2, headers=1
+package.json OK
+requirements.txt OK (      16 lines)
+SECURITY.md OK (     173 lines)
+CHANGELOG.md OK (      27 lines)
+app.css OK (     134 lines)
+
+===========================================
+[F8] PRD/SPEC.md integrity (sec 1-15 untouched)
+§1-§15 lines 1-795 SHA256: 5b11411354df2344… (837 total, +42 appended)
+
+===========================================
+== FINAL SUMMARY ==
+===========================================
+9 commits on rpb/round-1-productionize, all rpb(<role>): prefix, not pushed.
+All F1-F8 success criteria green.
