@@ -248,15 +248,26 @@ class PTTTracker:
 def load_config():
     """載入設定檔"""
     config_file = "config.json"
-    
+
     if os.path.exists(config_file):
         try:
             with open(config_file, 'r', encoding='utf-8') as f:
                 return json.load(f)
         except:
             pass
-    
+
     return {}
+
+
+def load_secrets():
+    """載入 Telegram 憑證(僅從環境變數讀取,絕不從 config.json 讀)。
+
+    集中讀取以避免 secrets 散布在程式碼各處,並讓 .env.example 成為唯一真實來源。
+    """
+    return {
+        'telegram_token': os.environ.get('PTT_TELEGRAM_TOKEN'),
+        'telegram_chat_id': os.environ.get('PTT_TELEGRAM_CHAT_ID'),
+    }
 
 
 def save_config(config):
@@ -380,10 +391,13 @@ def handle_telegram_command(update):
     
     elif command == '/pttnow' or command == '/pttnow@ptt_tracker_bot':
         # 立即執行檢查
+        secrets = load_secrets()
         tracker = PTTTracker(
             boards=config.get('boards', DEFAULT_BOARDS),
             keywords=config.get('keywords', []),
-            min_heat=config.get('min_heat', 10)
+            min_heat=config.get('min_heat', 10),
+            telegram_token=secrets['telegram_token'],
+            telegram_chat_id=secrets['telegram_chat_id'],
         )
         keyword_matches, new_articles = tracker.run()
         
@@ -449,14 +463,15 @@ def main():
     
     # Telegram Bot 模式
     if args.bot:
-        token = config.get('telegram_token')
+        secrets = load_secrets()
+        token = secrets['telegram_token']
         if not token:
-            print("[ERROR] config.json 中找不到 telegram_token")
+            print("[ERROR] 找不到 PTT_TELEGRAM_TOKEN 環境變數。請參考 .env.example。")
             return
-        
+
         print("\n[Telegram Bot Mode Started]")
         print("Send /ptthelp for commands\n")
-        
+
         telegram_polling(token)
         return
     
@@ -464,8 +479,17 @@ def main():
     boards = args.boards or config.get('boards', DEFAULT_BOARDS)
     keywords = args.keywords or config.get('keywords', [])
     min_heat = args.min_heat or config.get('min_heat', DEFAULT_MIN_HEAT)
-    
-    tracker = PTTTracker(boards=boards, keywords=keywords, min_heat=min_heat)
+
+    # Telegram 憑證僅從環境變數取得;config.json 不再含 secrets(見 .env.example)
+    secrets = load_secrets()
+
+    tracker = PTTTracker(
+        boards=boards,
+        keywords=keywords,
+        min_heat=min_heat,
+        telegram_token=secrets['telegram_token'],
+        telegram_chat_id=secrets['telegram_chat_id'],
+    )
     
     if args.interval:
         # 循環模式

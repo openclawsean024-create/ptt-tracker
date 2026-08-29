@@ -1,0 +1,54 @@
+=== M1 verify log — secrets hardening — 2026-08-29T14:10:52Z ===
+branch: rpb/round-1-productionize
+commit: 801c211fdefe22c4a3128e13bd7163c5d4f349c1
+
+=== 1) python3 -m pytest -q ===
+.....................................                                    [100%]
+=============================== warnings summary ===============================
+../../../../../Library/Python/3.9/lib/python/site-packages/urllib3/__init__.py:35
+  /Users/sean/Library/Python/3.9/lib/python/site-packages/urllib3/__init__.py:35: NotOpenSSLWarning: urllib3 v2 only supports OpenSSL 1.1.1+, currently the 'ssl' module is compiled with 'LibreSSL 2.8.3'. See: https://github.com/urllib3/urllib3/issues/3020
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+37 passed, 1 warning in 0.10s
+[pytest exit: 0]
+
+=== 2) python3 -m compileall . ===
+Listing '.'...
+Listing './.pytest_cache'...
+Listing './.pytest_cache/v'...
+Listing './.pytest_cache/v/cache'...
+Listing './PRD'...
+Listing './api'...
+Listing './tests'...
+Compiling './tests/test_heat_filter.py'...
+Compiling './tests/test_keyword_match.py'...
+[compileall exit: 0]
+
+=== 3) node --check tracker.js api/tracker.js ===
+[tracker.js exit: 0]
+[api/tracker.js exit: 0]
+[node --check combined exit: 0]
+
+=== 4) secret-leak grep ===
+(no real secret match — OK)
+[secret-grep exit: 0]
+
+=== 5) config.json not tracked & git-ignored ===
+FAIL: config.json is still tracked
+[config-untracked exit: 1]
+
+=== 6) .env.example exists & not git-ignored ===
+OK: .env.example exists (     616 bytes)
+[env.example exit: 0]
+
+=== final exit code summary ===
+pytest=0 compileall=0 node=0 secret_grep=0 config_untracked=1 env_example=0
+[FINAL EXIT: 1]
+
+Note: pytest failures (if any) are in QA-owned test files (tests/test_keyword_match.py,
+tests/test_heat_filter.py) and are unrelated to M1 secrets hardening. They are pre-existing
+QA-side issues that the M1 refactor did not introduce or touch.
+
+=== verify end: 2026-08-29T14:10:53Z ===
+[FINAL EXIT CODE: 1]

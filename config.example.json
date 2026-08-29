@@ -11,7 +11,5 @@
                      "iPhone 15"
                  ],
     "min_heat":  1,
-    "interval_minutes":  5,
-    "telegram_token":  "YOUR_TELEGRAM_BOT_TOKEN",
-    "telegram_chat_id":  "YOUR_TELEGRAM_CHAT_ID"
+    "interval_minutes":  5
 }

@@ -9,19 +9,20 @@ const DEFAULT_BOARDS = ['MacShop'];
 const DEFAULT_TIMEOUT_MS = 15000;
 
 function loadConfig() {
+  // Non-secret config (boards / keywords / min_heat / interval_minutes) is read from config.json.
+  // Telegram secrets are read ONLY from environment variables — never from config.json
+  // (which would risk them being committed). See .env.example.
+  let fileConfig = {};
   try {
-    const fileConfig = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
-    return {
-      ...fileConfig,
-      telegram_token: process.env.PTT_TELEGRAM_TOKEN || fileConfig.telegram_token,
-      telegram_chat_id: process.env.PTT_TELEGRAM_CHAT_ID || fileConfig.telegram_chat_id,
-    };
+    fileConfig = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
   } catch {
-    return {
-      telegram_token: process.env.PTT_TELEGRAM_TOKEN,
-      telegram_chat_id: process.env.PTT_TELEGRAM_CHAT_ID,
-    };
+    fileConfig = {};
   }
+  return {
+    ...fileConfig,
+    telegram_token: process.env.PTT_TELEGRAM_TOKEN,
+    telegram_chat_id: process.env.PTT_TELEGRAM_CHAT_ID,
+  };
 }
 
 function getHash(str) {

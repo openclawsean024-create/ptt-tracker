@@ -5,3 +5,13 @@ config.secrets.json
 __pycache__/
 *.pyc
 .vercel
+
+# Secrets & local-only configs (M1 backend hardening)
+# config.json may carry non-secret prefs (boards/keywords/min_heat/interval_minutes),
+# but to prevent any future secret from being committed it is git-ignored entirely;
+# use config.example.json as the template.
+config.json
+.env
+.env.*
+!.env.example
+*.pem
