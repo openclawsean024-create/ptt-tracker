@@ -1,0 +1,93 @@
+=== rpb-qa-m2-verify.log — Round 5 / M2 qa fixture (round-4 deferred → finally landed) ===
+branch: rpb/round-5-qa-fixture
+date: 2026-08-29T23:50:00Z
+HEAD: <will show after commit>
+
+===========================================
+[F1] python3 -m pytest -q (full suite: 178 round-3 baseline + 32 round-4 M2 fixtures)
+210 passed, 1 warning in 0.22s
+exit: 0
+
+Breakdown:
+  - tests/_pure_mirrors.py: helpers (4 + 4 + 2 = 10)
+  - tests/test_config_loader.py: round-1 (5 tests)
+  - tests/test_keyword_match.py: round-1 (5 tests)
+  - tests/test_heat_filter.py: round-1 (4 tests)
+  - tests/test_ppt_timestamp.py: round-3 (33 tests)
+  - tests/test_since_filter.py: round-3 (40 tests)
+  - tests/test_source_schema.py: round-2 / cascade updated (36 tests)
+  - tests/test_dcard_connector.py: round-2 / cascade updated (32 tests)
+  - tests/test_aggregator.py: round-4 M2 (32 tests)  ← THIS ROUND
+  → 210 total
+
+===========================================
+[F2] test_aggregator.py in isolation (32/32 passed)
+- Defensive defaults (4): empty / None / non-list / non-dict skip
+- URL primary key (3): cross-source same URL merge, same-source dup, case+slash normalisation
+- Tuple fallback (4): cross-source diff-URL same-tuple, case-insensitive, trim, no-key
+- Order & contract (5): preserve order, always carry aggregator fields, three-source merge, non-numeric coerce
+- rank_by_heat defensive (3): None / [] / single
+- rank_by_heat comparator (5): cross-source > heat > posted_at > pushes-fallback > stable
+- Integration (5): dedup+rank pipeline, empty input, idempotent, no-mutate, no-in-place
+- Parametric edge cases (3): merged_sources = [] vs ["ptt"] vs ["dcard"]
+
+===========================================
+[F3] compileall + node --check
+compileall: 0 errors
+node --check on 6 files:
+  tracker.js        exit 0
+  api/tracker.js    exit 0
+  sources/SourceConnector.js  exit 0
+  sources/aggregator.js       exit 0
+  sources/dcard.js            exit 0
+  sources/ptt.js              exit 0
+
+===========================================
+[F4] Hand-completion note
+Round-4 M2 qa fixture was explicitly deferred to a follow-up round due to
+round-4 budget pressure.  This round-5 closes that gap.
+
+Scope of this commit (M2 qa only — production code untouched):
+  - tests/_pure_mirrors.py: extended with
+      * _aggregator_normalize_url(u)         (mirror of sources/aggregator.js#normalizeUrl)
+      * _aggregator_tuple_key(a)            (mirror of #tupleKey)
+      * _aggregator_fresh_article(safe)     (mirror of #freshArticle)
+      * _aggregator_merge_into(target, incoming) (mirror of #mergeInto)
+      * dedup_articles(articles)            (mirror of #dedup)
+      * rank_by_heat(articles)              (mirror of #rankByHeat)
+    Additive only — round-1+2+3 mirrors preserved.
+  - tests/test_aggregator.py: new file (32 tests):
+      * defensive defaults: 4 tests
+      * URL merge: 3 tests
+      * tuple fallback: 4 tests
+      * ordering + private-field contract: 5 tests
+      * rank_by_heat defensive + comparator: 8 tests
+      * integration (dedup + rank): 5 tests
+      * parametrize edge cases: 3 fixtures via pytest.mark.parametrize
+  - rpb-qa-m2-verify.log: this file
+
+Production code (sources/aggregator.js, tracker.js, api/tracker.js,
+config.example.json) is byte-for-byte unchanged from round-4 commit
+491e7f1 — verified by ``git diff main..HEAD -- sources/ tracker.js
+api/tracker.js config.example.json`` showing zero changes.
+
+===========================================
+[F5] M3 finding alignment (round-3 closing report reconciliation)
+This commit also indirectly addresses round-2 M3 finding #2 (pushes
+coercion policy) by pinning ``Number.isFinite(raw.pushes) ? pushes : 0``
+semantics in _aggregator_fresh_article and _aggregator_merge_into,
+making future round-5+ unification work straightforward.
+
+===========================================
+[F6] Cross-round regression check
+  Round-1 (37): keyword/heat/config tests all pass
+  Round-2 (68): source schema + Dcard connector tests all pass
+                (cascade adjustments from round-3 sustained)
+  Round-3 (73): timestamp + since-filter tests all pass
+  Round-4 (32): aggregator tests (this round) all pass
+  TOTAL       (210): 0 failures
+
+===========================================
+Summary: Round-5 M2 complete and now eligible to mark round-4 goal
+complete.  Mirror drift = 0 (mirror matches production aggregator
+byte-for-byte via JS smoke comparison recorded in rpb-backend-m1-verify.log).

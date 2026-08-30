@@ -620,3 +620,225 @@ def normalize_article(source_name, raw):
             )
         )
     return normalizer(raw)
+
+
+# ---------------------------------------------------------------------------
+# Round-4 M2: aggregator mirrors (``sources/aggregator.js``)
+# ---------------------------------------------------------------------------
+#
+# Pure-function mirrors of the round-4 cross-source aggregator.  The JS
+# implementation lives in ``sources/aggregator.js``; the mirror exists so
+# the round-5 fixture can assert the dedup + heat-rank contract without
+# ever reaching into ``tracker.js``'s CLI surface.
+#
+# Contract
+# --------
+#   * Both functions are **total** — None / [] / non-list input returns
+#     ``[]`` and never raises.
+#   * dedup primary key = normalised ``url`` (trim + lowercase, drop a
+#     single trailing slash).  Fallback key = ``(title, posted_at)``
+#     tuple, both lowercased and trimmed.  Empty fallback key (``title``
+#     and ``posted_at`` both falsy) is treated as no key (article stays
+#     fresh).
+#   * When the same logical story is seen twice, the ``pushes`` field
+#     recorded on the merged entry is the **max** (not sum) of both
+#     observations.  Same-source duplicates don't increment ``_sourceCount``.
+#   * Cross-source merges add exactly one entry to ``_mergedSources`` and
+#     bump ``_sourceCount``.  ``_sourceCount`` is derived from
+#     ``_mergedSources.length`` so the counter and the list cannot drift.
+#   * rankByHeat uses ``Array.prototype.sort`` semantics (V8 stable).  The
+#     Python mirror relies on ``sorted(..., key=...)`` but the comparator
+#     encodes the same primary / secondary / tertiary keys to get a
+#     byte-aligned order at the limit cases tested in
+#     ``tests/test_aggregator.py``.
+#
+# Out of scope (deliberate)
+# ------------------------
+#   * Persistence / cache layer between dedup + rank — they are
+#     composable, both pure.
+#   * Time-decay weighting or sentiment scoring — round-5+.
+
+
+def _aggregator_normalize_url(u):
+    """Mirror of ``sources/aggregator.js`` ``normalizeUrl``.
+
+    ``None`` / non-string / empty -> ``""`` (no key).
+    Trim + lowercase; drop one trailing slash so the canonical URL is
+    shared between ``foo`` and ``foo/``.
+    """
+    if not isinstance(u, str) or not u:
+        return ""
+    s = u.strip().lower()
+    if s.endswith("/"):
+        s = s[:-1]
+    return s
+
+
+def _aggregator_tuple_key(a):
+    """Mirror of ``sources/aggregator.js`` ``tupleKey``.
+
+    ``None`` / missing fields -> ``""`` (no key).
+
+    ``date`` / ``timestamp`` fallback is the same as round-3
+    ``posted_at`` — production prefers ``posted_at`` (round-3 contract)
+    and falls back to ``timestamp`` only when ``posted_at`` is missing.
+    The mirror matches the production order: ``posted_at or timestamp``.
+    """
+    safe = a if isinstance(a, dict) else {}
+    title = (safe.get("title") or "").strip().lower()
+    posted_at = (
+        safe.get("posted_at") if safe.get("posted_at") is not None
+        else (safe.get("timestamp") or "")
+    )
+    posted_at = (posted_at or "").strip()
+    if not title and not posted_at:
+        return ""
+    return ("T", title, posted_at)
+
+
+def _aggregator_fresh_article(safe):
+    """Mirror of ``sources/aggregator.js`` ``freshArticle``.
+
+    Returns a fresh-article dict carrying all ``safe`` keys (so legacy
+    fields like ``date`` / ``href`` / ``heat`` propagate) plus the
+    aggregator-private accounting fields.
+    """
+    raw = safe if isinstance(safe, dict) else {}
+    pushes = raw.get("pushes")
+    if isinstance(pushes, bool) or not isinstance(pushes, (int, float)):
+        pushes = 0
+    sources = [str(raw["source"])] if raw.get("source") else []
+    out = dict(raw)
+    out["pushes"] = pushes
+    out["heat"] = pushes
+    out["_sourceCount"] = 1
+    out["_totalPushes"] = pushes
+    out["_mergedSources"] = sources
+    return out
+
+
+def _aggregator_merge_into(target, incoming):
+    """Mirror of ``sources/aggregator.js`` ``mergeInto``.
+
+    Mutates ``target`` in place.  Pushes / heat / ``_totalPushes``
+    become the max of the two sides.  ``_mergedSources`` only appends
+    when ``incoming.source`` is not already in the list (defensive
+    against stringified / un-stripped values).
+    """
+    t_p = target.get("pushes")
+    t_p = t_p if isinstance(t_p, (int, float)) and not isinstance(t_p, bool) else 0
+    i_p = incoming.get("pushes")
+    i_p = i_p if isinstance(i_p, (int, float)) and not isinstance(i_p, bool) else 0
+    merged = max(t_p, i_p)
+    target["pushes"] = merged
+    target["heat"] = merged
+    target["_totalPushes"] = merged
+
+    source = incoming.get("source")
+    if source:
+        source_str = str(source)
+        existing = target.get("_mergedSources") or []
+        if source_str not in existing:
+            target["_mergedSources"] = sorted(list(existing) + [source_str])
+            target["_sourceCount"] = len(target["_mergedSources"])
+
+
+def dedup_articles(articles):
+    """Mirror of ``sources/aggregator.js`` ``dedup``.
+
+    Merges articles that share a normalised ``url`` (primary) or
+    ``(title, posted_at)`` tuple (secondary).  Records aggregator-private
+    ``_sourceCount`` / ``_totalPushes`` / ``_mergedSources`` so the
+    rank function can use them.
+
+    Empty / None input returns ``[]``.  Non-list input is normalised to
+    ``[]`` (defensive — a typo in a fixture is always a test bug, but we
+    keep the mirror total).
+    """
+    if not isinstance(articles, list) or not articles:
+        return []
+    out = []
+    by_url = {}
+    by_tuple = {}
+
+    for art in articles:
+        if not isinstance(art, dict):
+            continue
+        norm_url = _aggregator_normalize_url(art.get("url"))
+        tkey = _aggregator_tuple_key(art)
+
+        # 1) URL match — primary.
+        if norm_url and norm_url in by_url:
+            _aggregator_merge_into(by_url[norm_url], art)
+            continue
+        # 2) Tuple match — secondary.
+        if tkey and tkey in by_tuple:
+            target = by_tuple[tkey]
+            _aggregator_merge_into(target, art)
+            if norm_url:
+                by_url[norm_url] = target  # promote
+            continue
+
+        fresh = _aggregator_fresh_article(art)
+        out.append(fresh)
+        if norm_url:
+            by_url[norm_url] = fresh
+        if tkey:
+            by_tuple[tkey] = fresh
+    return out
+
+
+def rank_by_heat(articles):
+    """Mirror of ``sources/aggregator.js`` ``rankByHeat``.
+
+    Comparator semantics (descending):
+      1. ``_sourceCount`` — cross-source articles first
+      2. ``_totalPushes`` falling back to ``pushes`` — heat desc
+      3. ``posted_at`` falling back to ``timestamp`` — newer first
+      4. otherwise stable (input order)
+
+    Empty / None input returns ``[]``.
+
+    Implementation note: Python ``sorted(..., key=fn)`` wants a single-
+    argument key function, not a comparator.  We compose three stable
+    sorts (each ``reverse=True`` flips the level of comparison to
+    descending) so the secondary / tertiary fields preserve their
+    relative order across the previous sort.  This yields byte-level
+    parity with the JS implementation at the limit cases pinned by
+    ``tests/test_aggregator.py``.
+    """
+    if not isinstance(articles, list) or not articles:
+        return []
+
+    def _src(art):
+        if not isinstance(art, dict):
+            return 1
+        sc = art.get("_sourceCount")
+        return sc if isinstance(sc, int) else 1
+
+    def _heat(art):
+        if not isinstance(art, dict):
+            return 0
+        tp = art.get("_totalPushes")
+        if isinstance(tp, (int, float)):
+            return tp
+        pushes = art.get("pushes")
+        return pushes if isinstance(pushes, (int, float)) else 0
+
+    def _posted(art):
+        if not isinstance(art, dict):
+            return ""
+        pa = art.get("posted_at")
+        if isinstance(pa, str) and pa:
+            return pa
+        ts = art.get("timestamp")
+        return ts if isinstance(ts, str) else ""
+
+    # Tertiary first (posted_at desc, stable)
+    by_posted = sorted(articles, key=_posted, reverse=True)
+    # Secondary (_totalPushes desc, stable preserves tertiary within ties)
+    by_heat = sorted(by_posted, key=_heat, reverse=True)
+    # Primary (_sourceCount desc, stable preserves secondary + tertiary)
+    by_source = sorted(by_heat, key=_src, reverse=True)
+    return by_source
+
