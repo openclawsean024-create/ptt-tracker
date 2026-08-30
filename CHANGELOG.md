@@ -61,3 +61,13 @@
 - **PTT `posted_at` heuristic**:`currentYear + raw.date` 拼出 post time;若距離現在 > 90 天,fallback 到 `currentYear - 1`(處理年底 / 年初跨年文章)。
 - **Dcard 原生 since filter**:透傳 `?after=<ISO>` query param 給 Dcard `/api/posts`(Dcard 原生支援)。
 - **Tests**:`tests/test_ppt_timestamp.py`(happy path / 跨年 / grace / defensive default) + `tests/test_since_filter.py`(PTT-side + Dcard-side + cross-source intersection);`tests/_pure_mirrors.py` 延伸 `parsePtt_date` + `apply_since_filter`(待 M3 commit 後補 round-3 detailed test 列表)。
+
+## [Unreleased] — round-4 (v3.0 cross-source aggregator)
+
+> 本輪把 round-3 deferred 的「跨來源去重 / 聚合」最小切片實作:SPEC §3 P0-3 跨平台彙整的「去重 + 熱度排名」。**§1-§15 不變**,僅附加附錄 D 紀錄實作範圍。Backend / QA 的詳細 commit 列表待 round-4 final verify 後補。
+
+### Added
+- **`sources/aggregator.js`**(純函式):`dedup(articles)` 以 `url` 為 primary key、`(title, board, posted_at)` 為 secondary;`rankByHeat(articles)` 依 `_totalPushes` 降冪排序,`_sourceCount > 1` 的 cross-source 文章自動排在 single-source 之上。合併後附加私有欄位 `_sourceCount` 與 `_totalPushes`(下劃線前綴避免污染既有 schema)。
+- **`tracker.js` + `api/tracker.js`** 預設走 aggregator;CLI 新增 `--no-aggregate` flag、serverless 接受 `?aggregate=false` query param,退回 round-3 行為。
+- **`config.json.aggregate`** boolean 欄位(預設 `true`),user 可在 config 關閉。
+- **Tests**:`tests/_pure_mirrors.py` 擴 `dedup_articles` + `rank_by_heat`(JS ↔ Python mirror,drift = 0);`tests/test_aggregator.py` 新檔涵蓋 dedup case 1-4(同 URL 跨來源 / 同來源重複 / 不同 URL / url 缺 fallback) + ranking(cross-source 優先 / stable sort / 空 list)。

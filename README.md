@@ -19,6 +19,7 @@ Live: https://ptt-alertor-olive.vercel.app
   在 `config.json` 用 `sources` 欄位切換,例如 `"sources": ["ptt", "dcard"]`;未填則預設只跑 `["ptt"]`(與 v2.x 行為相容)。
 - **時間語意對齊(round-3)**:所有來源的 `Article.timestamp` 都對齊到 **post time**(`posted_at`);`fetched_at` 記錄 scrape time。`timestamp` 保留為 alias,向後相容。
 - **`since`-filtering(round-3)**:CLI 用 `node tracker.js --since <ISO>`,serverless 用 `/api/tracker?since=<ISO>` query param;PTT 用 `posted_at` heuristic 比對,Dcard 用原生 `?after=<ISO>`。
+- **跨來源聚合(round-4)**:同 URL 或同 `(title, board, posted_at)` 的文章會合併。`_sourceCount` 記錄提到幾個 source,`_totalPushes` 是 article 的最高 pushes。預設開啟;`tracker.js --no-aggregate` 或 `?aggregate=false` 可關。Cross-source 的文章自動排在 single-source 之上。
 - **Roadmap(規劃中,未實作)**:
   - `Threads`:需 Meta Business 帳號申請,非個人可解。
   - `巴哈姆特`:目前無公開 API,scrape 法規 grey zone。

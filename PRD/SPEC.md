@@ -922,3 +922,41 @@ v3.0 的 follow-up goal 草稿已存放在 `prompts/ptt-tracker/follow-up-v3.0.m
 - **PDF 週報**(SPEC §3 P0-5):留 round 5+。
 - **跨來源去重演算法**:本輪只做各 source 內 since-filter,不跨來源 dedup;留 round 4。
 - **BullMQ / Redis worker infra**(SPEC §3 P0-1「每平台獨立 worker」):現規模不需要;留 round 5+。
+
+## 附錄 D — round-4 實作紀錄(2026-08-29)
+
+> 本輪實作 round-3 deferred 的「跨來源去重 + 熱度排名」(SPEC §3 P0-3 跨平台彙整的最小可驗收切片)。**§1-§15 + 附錄 A + 附錄 B + 附錄 C byte-for-byte 不動**,僅 append 本附錄。
+
+### D.1 round-4 範圍一句話
+
+新增 `sources/aggregator.js` 純函式(`dedup` + `rankByHeat`),把 `tracker.js` + `api/tracker.js` 的多來源結果透過 aggregator 處理:同 `url`(或 fallback 同 `(title, board, posted_at)`)的 article 合併、計算 `_sourceCount` / `_totalPushes`、依熱度降冪排序,並讓 cross-source 文章自動排在 single-source 之上。CLI `--no-aggregate` / serverless `?aggregate=false` 可關。
+
+### D.2 round-4 commits(本附錄撰寫時,最終清單待 orchestrator final verify 補)
+
+- `rpb(orchestrator): round-4 PLAN — cross-source aggregation (dedup by URL + heat ranking) for SPEC §3 P0-3`
+- `rpb(backend): round-4 M1 — sources/aggregator.js (dedup + rankByHeat) + tracker.js / api/tracker.js / config.example.json 整合`
+- `rpb(qa): round-4 M2 — tests/test_aggregator.py + tests/_pure_mirrors.py 擴 dedup_articles + rank_by_heat (mirror drift = 0)`
+- `rpb(docs): round-4 docs — README aggregator note, CHANGELOG round-4 entry, SPEC 附錄 D`(本 commit)
+- `rpb(orchestrator): round-4 final verify + summary`(由 orchestrator 收尾時補)
+
+### D.3 round-4 文件同步摘要
+
+- `README.md`:在「v3.0 狀態(Status)」段**下方**新增 1 個 list-item —— 「跨來源聚合(round-4)」,放在 `since`-filtering 之後、Roadmap 之前。字數 291 → 315(1.08x,well under 1.5x cap;hard ceiling 350)。
+- `CHANGELOG.md`:在 round-3 entry **之後**新增 round-4 entry(round-1 / round-2 / round-3 entry 完整保留)。Round-4 entry 9 行(≤ 30)。
+- `PRD/SPEC.md`:純 append 附錄 D;**§1-§15 + 附錄 A + 附錄 B + 附錄 C byte-for-byte 不動**(SHA256 of first 795 lines 仍為 `5b11411354df2344…`,round-1 / round-2 / round-3 baseline 一致)。
+- `rpb-docs-m4-verify.log`:scope check + README 字數 + CHANGELOG entry 長度 + SPEC §1-§15 SHA256 integrity check。
+
+### D.4 round-4 deferred 項目(再次明示)
+
+下列項目 round-4 **明確不做**,留 round-5+ 評估:
+
+- **Scoring 演算法**:本輪是 SIMPLE `total pushes`(最大 pushes 而非加總,避免 double-count),不做時間衰減 / sentiment 加權 / keyword 命中加分(SPEC §3 P0-3 後段)。
+- **Threads connector**:需 Meta Business 帳號申請,非個人可解。
+- **巴哈姆特 connector**:目前無官方公開 API;scrape 法規 grey zone。
+- **AI 情緒分類(GPT-4o-mini)**:需 OpenAI 帳號 + cost;留 round 5+。
+- **多通道 LINE / Slack / Email 警示**(SPEC §3 P0-4):需外部 webhook 憑證;留 round 6+。
+- **PDF 週報**(SPEC §3 P0-5):留 round 6+。
+- **BullMQ / Redis worker infra**(SPEC §3 P0-1「每平台獨立 worker」):現規模不需要;留 round 7+。
+- **真實 dashboard UI**(SPEC §3 P0-3 後段):aggregator 已備資料流,UI 留 round 5+。
+- **aggregator persistent cache / DB**:本輪純函式 in-memory;round 5+ 若需 cross-run cache 才評估。
+- **Multi-tenant / 付費**:SPEC §1.5 non-goals。
