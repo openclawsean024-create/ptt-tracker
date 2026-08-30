@@ -39,7 +39,9 @@
  *       board: string,                  // forumName || forumAlias
  *       author: string,                 // user.nickname || user.id
  *       pushes: number,                 // reactionCount || 0
- *       timestamp: string,              // ISO 8601 from createdAt, or now()
+ *       posted_at: string,              // ISO 8601, raw.createdAt (post time)
+ *       fetched_at: string,             // ISO 8601, normalize time (scrape time)
+ *       timestamp: string,              // legacy alias = posted_at
  *       source: 'dcard',
  *       // legacy extras (kept for symmetry with PTT; legacy field names
  *       // used by downstream consumers / mirror tests)
@@ -97,15 +99,25 @@ function toNonNegativeInt(value) {
 /**
  * Normalize a raw Dcard post payload into the unified Article schema.
  *
- * Defensive defaults emit all 7 required keys even if the source record
+ * Defensive defaults emit every required key even if the source record
  * is sparse (hand-crafted fixtures, partial API responses, etc.).  The
  * function is **total** — never throws on missing fields.
  *
+ * Round-3 M1: time semantics split.  ``posted_at`` is the author's
+ * post time (``raw.createdAt`` — Dcard ships the real ISO 8601).
+ * ``fetched_at`` is the moment *this* process normalized the record
+ * (``new Date().toISOString()`` at ``normalize`` time).  ``timestamp``
+ * is the legacy alias kept equal to ``posted_at`` so the same field
+ * name means the same thing across all sources (round-2 M3 finding #3
+ * is closed — ``timestamp`` is no longer "scrape time" on PTT and
+ * "post time" on Dcard, it's post time everywhere).
+ *
  * @param {object} raw   raw Dcard API post (or fixture)
- * @param {object} _ctx  unused; kept for SourceConnector contract symmetry
+ * @param {object} ctx   ctx.now (optional) lets tests pin the
+ *                       ``fetched_at`` stamp deterministically
  * @returns {object}     unified Article
  */
-function normalizeArticle(raw, _ctx = {}) {
+function normalizeArticle(raw, ctx = {}) {
   const safe = raw || {};
   const user = safe.user || {};
   const forumAlias = safe.forumAlias || (safe.forum && safe.forum.alias) || '';
@@ -116,15 +128,19 @@ function normalizeArticle(raw, _ctx = {}) {
   const pushes = toNonNegativeInt(safe.reactionCount);
   // Dcard's ``createdAt`` is already ISO 8601 (e.g.
   // ``2026-08-29T15:30:00.000Z``).  When missing we stamp "now" so the
-  // Article always has a parseable timestamp (M3 ISO parser tests need
+  // Article always has a parseable posted_at (M3 ISO parser tests need
   // this guarantee).
-  const timestamp = safe.createdAt || new Date().toISOString();
+  const postedAt = safe.createdAt || new Date().toISOString();
+  // fetched_at is the moment this process normalized the record; under
+  // test ``ctx.now`` lets us pin a deterministic value.
+  const nowRef = ctx && ctx.now ? new Date(ctx.now) : new Date();
+  const fetchedAt = nowRef.toISOString();
   // Short date (``YYYY-MM-DD``) — mirrors PTT's ``date`` field shape
   // (which is ``M/DD`` in PTT but normalized by the existing pipeline as
-  // a free-form string).  Empty when timestamp is unparseable.
+  // a free-form string).  Empty when posted_at is unparseable.
   let date = '';
-  if (typeof timestamp === 'string' && timestamp.length >= 10) {
-    date = timestamp.slice(0, 10);
+  if (typeof postedAt === 'string' && postedAt.length >= 10) {
+    date = postedAt.slice(0, 10);
   }
   const href = forumAlias && id ? buildPostUrl(id, forumAlias) : '';
 
@@ -134,7 +150,12 @@ function normalizeArticle(raw, _ctx = {}) {
     board: forumName || forumAlias,
     author,
     pushes,
-    timestamp,
+    // Round-3 M1 time semantics (canonical).
+    posted_at: postedAt,
+    fetched_at: fetchedAt,
+    // Round-1+round-2 legacy alias — equal to ``posted_at`` so cross-
+    // source callers see the same semantic for the same field name.
+    timestamp: postedAt,
     source: 'dcard',
     // Legacy / extras — see PTT normalize for why these are kept.
     date,

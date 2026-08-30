@@ -1,46 +1,68 @@
-=== rpb-backend-m1-verify.log — generated 2026-08-29T15:31:27Z ===
+=== rpb-backend-m1-verify.log — Round 3 / Milestone 1 ===
+branch: rpb/round-3-v3-since
+date: 2026-08-30T15:02:18Z
+commit pending — see bottom
 
-## [1/4] node --check (4 files)
-  tracker.js: OK
-  api/tracker.js: OK
-  sources/SourceConnector.js: OK
-  sources/ptt.js: OK
-  exit: 0
+===========================================
+[F1] python3 -m compileall .
+Listing './tests'...
+Compiling './tests/test_dcard_connector.py'...
+Compiling './tests/test_source_schema.py'...
+exit: 0
 
-## [2/4] python3 -m compileall .
-  exit: 0
+===========================================
+[F2] node --check tracker.js api/tracker.js + sources/*.js
+  tracker.js exit: 0
+  api/tracker.js exit: 0
+  sources/SourceConnector.js exit: 0
+  sources/dcard.js exit: 0
+  sources/ptt.js exit: 0
 
-## [3/4] python3 -m pytest -q
-.....................................                                    [100%]
-=============================== warnings summary ===============================
-../../../../../Library/Python/3.9/lib/python/site-packages/urllib3/__init__.py:35
-  /Users/sean/Library/Python/3.9/lib/python/site-packages/urllib3/__init__.py:35: NotOpenSSLWarning: urllib3 v2 only supports OpenSSL 1.1.1+, currently the 'ssl' module is compiled with 'LibreSSL 2.8.3'. See: https://github.com/urllib3/urllib3/issues/3020
-    warnings.warn(
+===========================================
+[F3] python3 -m pytest -q (105 passed)
 
 -- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
-37 passed, 1 warning in 0.10s
-  exit: 0
+105 passed, 1 warning in 0.13s
+exit: 0
 
-## [4/4] JS smoke — interface contract + parseArticles equivalence
-  ✓ SourceConnector class
-  ✓ isSourceEnabled exported
-  ✓ resolveSources exported
-  ✓ connector.name === ptt
-  ✓ connector.enabled default true
-  ✓ healthcheck() returns {ok:true}
-  ✓ resolveSources({}) defaults to [ptt]
-  ✓ resolveSources({sources:[]}) === []
-  ✓ resolveSources({sources:["ptt","dcard"]}) preserves order
-  ✓ isSourceEnabled default true when no map
-  ✓ isSourceEnabled honors map=false
-  ✓ isSourceEnabled honors map=true
-  ✓ parseArticles extracts title
-  ✓ parseArticles extracts pushes (爆→100)
-  ✓ parseArticles includes heat alias
-  ✓ parseArticles preserves board
-  ✓ normalize has all 7 required keys
-  ✓ normalize source === ptt
-  ✓ normalize timestamp is ISO
-  ✓ normalize preserves legacy heat/date/href
-  --- 20 checks, 0 failed
-  exit: 0
+===========================================
+[F4] Article schema verification (round-3 M1 new fields)
+UNIFIED_ARTICLE_KEYS = ['title', 'url', 'board', 'author', 'pushes', 'posted_at', 'fetched_at', 'source']
+LEGACY_ARTICLE_KEYS  = ['date', 'href', 'heat']
+TIMESTAMP_ALIAS_KEY  = timestamp
+ARTICLE_KEYS total   = 12
+
+Dcard article.posted_at = 2026-01-15T12:00:00.000Z
+Dcard article.timestamp  = 2026-01-15T12:00:00.000Z
+alias match: True
+fetched_at present: True
+
+===========================================
+[F5] git status (before commit)
+ M rpb-backend-m1-verify.log
+ M sources/SourceConnector.js
+ M sources/dcard.js
+ M sources/ptt.js
+ M tests/_pure_mirrors.py
+ M tests/test_dcard_connector.py
+ M tests/test_source_schema.py
+
+===========================================
+## Hand-completion note
+M1 subagent (deb6d99b) failed 3 times mid-execution (each closing
+message indicates it understood the task but never finished writing).
+The 90% of M1 scope that made it onto disk — source connectors,
+doc updates, _pure_mirrors.py constants, parsePtt_date Python helper —
+is high-quality and was authored by the M1 subagent.
+
+The remaining 10% (cascade _normalize_ptt + _normalize_dcard emit
+updates, strict test cascade in test_dcard_connector.py:292 and
+test_source_schema.py:138) was hand-completed by the orchestrator
+in this commit (rpb(backend): per the goal's commit-prefix rule).
+
+The exact diff in this commit (orchestrator-attributed):
+  tests/_pure_mirrors.py          — _normalize_ptt + _normalize_dcard updated to emit posted_at / fetched_at / timestamp-alias
+  tests/test_source_schema.py:138 — assert timestamp == createdAt → assert posted_at == createdAt (+ legacy alias check)
+  tests/test_dcard_connector.py:292 — assert len == 10 → assert len == 12 (+ happy-path dict expansion to per-field check including fetched_at)
+
+All 105 pytest green. node --check 5/5. compileall 0 errors.

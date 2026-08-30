@@ -35,7 +35,32 @@
  *   normalize(raw, ctx) -> Article
  *     Translate a single raw post into the unified Article shape::
  *
- *         { title, url, board, author, pushes, timestamp, source }
+ *         {
+ *           title, url, board, author, pushes, source,            // identity
+ *           posted_at, fetched_at, timestamp,                    // time semantics (round-3 M1)
+ *           // Legacy extras preserved for round-1 compatibility:
+ *           date, href, heat,
+ *         }
+ *
+ *     Time semantics (round-3 M1):
+ *       * ``posted_at``  — ISO 8601, the moment the **author** published
+ *         the post.  For Dcard this is ``raw.createdAt`` (the platform
+ *         gives us the real post time).  For PTT the board index only
+ *         ships a ``" 3/27"`` style ``M/D`` string, so ``normalize``
+ *         combines it with the current year via the
+ *         ``parsePttDate(dateStr)`` heuristic (with a 90-day cross-year
+ *         fallback).  This is the field round-3 ``since``-filtering
+ *         compares against.
+ *       * ``fetched_at`` — ISO 8601, the moment **this process**
+ *         normalized the record (``new Date().toISOString()`` at
+ *         ``normalize`` time).  Independent of the source so every
+ *         adapter records the same notion.
+ *       * ``timestamp``  — **legacy alias**.  Kept for round-1+round-2
+ *         back-compat with the existing 105 pytest mirror tests and any
+ *         downstream consumer that still reads ``article.timestamp``.
+ *         From round-3 onwards ``timestamp === posted_at`` for every
+ *         source (so the same field name means the same thing
+ *         cross-source — round-2 M3 finding #3 is closed).
  *
  *     ``ctx`` is the same object passed to ``fetch`` so the source can
  *     reach config (e.g. to default the ``board`` field when the raw
@@ -49,9 +74,14 @@
  * Backwards compatibility
  * -----------------------
  * Round-1 contract (PTT-specific fields like ``href``, ``heat``, ``date``,
- * ``pushes``) is preserved by ``normalize`` — the unified Article shape
- * adds ``source`` and ``timestamp`` while keeping ``pushes`` (the field
- * the rest of the pipeline already filters on).
+ * ``pushes``) is preserved by ``normalize``.  Round-2 added ``source``
+ * and ``timestamp`` (originally carrying scrape time on PTT).  Round-3
+ * splits the time semantics: ``posted_at`` is the canonical post time,
+ * ``fetched_at`` records when the connector normalized the record, and
+ * ``timestamp`` is kept as a legacy alias equal to ``posted_at`` so
+ * existing 105 pytest mirror tests continue to pass without source-side
+ * changes.  ``pushes`` (the field the rest of the pipeline filters on)
+ * is still present.
  */
 'use strict';
 

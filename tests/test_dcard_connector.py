@@ -67,21 +67,29 @@ def _parse_iso8601(value):
 
 
 def test_happy_path_matches_expected_article():
-    """The documented Dcard → Article mapping, asserted field by field."""
+    """The documented Dcard → Article mapping, asserted field by field.
+
+    ``posted_at`` mirrors ``raw.createdAt`` (post time).  ``fetched_at``
+    is normalize-time (scrape time) — so this test only pins ``posted_at``
+    to the fixture's known value (deterministic) and asserts the
+    ``timestamp`` legacy alias equals ``posted_at``; the ``fetched_at``
+    is verified by ``test_fetched_at_is_iso8601_now_like`` separately.
+    """
     article = normalize_article("dcard", raw(RAW_DCARD_POST))
 
-    assert article == {
-        "title": "[心得] Mac mini M4 開箱與效能實測",
-        "url": "https://www.dcard.tw/f/3c/p/123456789",
-        "board": "3C",
-        "author": "applefans",
-        "pushes": 731,
-        "timestamp": "2026-08-29T15:30:00.000Z",
-        "source": "dcard",
-        "date": "2026-08-29",
-        "href": "https://www.dcard.tw/f/3c/p/123456789",
-        "heat": 731,
-    }
+    assert article["title"] == "[心得] Mac mini M4 開箱與效能實測"
+    assert article["url"] == "https://www.dcard.tw/f/3c/p/123456789"
+    assert article["board"] == "3C"
+    assert article["author"] == "applefans"
+    assert article["pushes"] == 731
+    assert article["posted_at"] == "2026-08-29T15:30:00.000Z"
+    assert article["timestamp"] == article["posted_at"]  # legacy alias
+    assert article["source"] == "dcard"
+    assert article["date"] == "2026-08-29"
+    assert article["href"] == "https://www.dcard.tw/f/3c/p/123456789"
+    assert article["heat"] == 731
+    assert "fetched_at" in article  # round-3 M1: now() stamp
+    assert _parse_iso8601(article["fetched_at"]) is not None
 
 
 def test_article_never_leaks_raw_dcard_only_fields():
@@ -285,11 +293,11 @@ def test_board_prefers_forum_name_then_alias():
 
 
 def test_empty_raw_does_not_crash_and_yields_full_article():
-    """``normalize_article('dcard', {})`` returns all 10 keys."""
+    """``normalize_article('dcard', {})`` returns all 12 keys (round-3 M1: +posted_at, +fetched_at, +timestamp alias)."""
     article = normalize_article("dcard", {})
 
     assert set(article) == set(ARTICLE_KEYS)
-    assert len(article) == 10
+    assert len(article) == 12
 
 
 def test_empty_raw_default_values():

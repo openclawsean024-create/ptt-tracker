@@ -40,7 +40,7 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Iterable, Mapping
 
 
@@ -119,30 +119,130 @@ def filter_by_heat(articles, min_heat):
 # ---------------------------------------------------------------------------
 #
 # The unified Article schema (documented in ``sources/SourceConnector.js``)
-# is::
+# from round-3 M1 is::
 #
-#     { title, url, board, author, pushes, timestamp, source }
+#     {
+#       title, url, board, author, pushes, source,            # identity
+#       posted_at, fetched_at,                               # time semantics
+#     }
 #
-# Both concrete connectors additionally emit three *legacy* extras
-# (``date`` / ``href`` / ``heat``) so round-1 consumers and the existing
-# heat-filter mirror keep working.  Full Article = 10 keys.
+# ``timestamp`` is a **legacy alias** equal to ``posted_at`` (kept so
+# round-1+round-2 mirror tests and any downstream consumer reading
+# ``article.timestamp`` keep working without source-side changes).
+#
+# Both concrete connectors additionally emit the three round-1 legacy
+# extras (``date`` / ``href`` / ``heat``).  Full Article = 9 unified
+# keys (8 unified + the ``timestamp`` alias) + 3 extras = 12 keys.
 
-#: The 7 keys every source MUST emit (the cross-source contract).
+#: The 8 canonical keys every source MUST emit (the cross-source contract).
 UNIFIED_ARTICLE_KEYS = (
     "title",
     "url",
     "board",
     "author",
     "pushes",
-    "timestamp",
+    "posted_at",
+    "fetched_at",
     "source",
 )
 
 #: Round-1 compatibility extras every round-2 connector also emits.
 LEGACY_ARTICLE_KEYS = ("date", "href", "heat")
 
-#: Full key set of a normalized Article (unified + legacy).
-ARTICLE_KEYS = UNIFIED_ARTICLE_KEYS + LEGACY_ARTICLE_KEYS
+#: ``timestamp`` is a legacy alias of ``posted_at`` (round-3 M1).  Kept
+#: out of :data:`UNIFIED_ARTICLE_KEYS` to keep the canonical schema
+#: honest about its real semantic split; appended to the full key set
+#: so round-1+round-2 tests asserting ``set(article) == set(ARTICLE_KEYS)``
+#: still match.
+TIMESTAMP_ALIAS_KEY = "timestamp"
+
+#: Full key set of a normalized Article (unified + legacy extras + alias).
+ARTICLE_KEYS = UNIFIED_ARTICLE_KEYS + LEGACY_ARTICLE_KEYS + (TIMESTAMP_ALIAS_KEY,)
+
+# Round-3 M1: how aggressively ``parsePtt_date`` suspects a PTT
+# ``" M/D"`` date refers to the previous calendar year.  Must stay in
+# sync with ``sources/ptt.js`` ``PTT_CROSS_YEAR_THRESHOLD_DAYS``.
+PTT_CROSS_YEAR_THRESHOLD_DAYS = 90
+
+
+def _resolve_now(now):
+    """Mirror of ``sources/ptt.js`` ``resolveNow``.
+
+    ``now`` accepts ``None`` (default → current wall time), a
+    ``datetime``, an epoch-ms int/float, or an ISO 8601 string.
+    """
+    if now is None:
+        return datetime.now(timezone.utc)
+    if isinstance(now, datetime):
+        if now.tzinfo is None:
+            return now.replace(tzinfo=timezone.utc)
+        return now
+    if isinstance(now, (int, float)):
+        return datetime.fromtimestamp(float(now), tz=timezone.utc)
+    if isinstance(now, str):
+        # Tolerant ISO 8601 parse — accept ``Z`` suffix and ``+HH:MM``.
+        text = now.strip()
+        if text.endswith("Z"):
+            text = text[:-1] + "+00:00"
+        return datetime.fromisoformat(text)
+    raise TypeError("now must be None, datetime, epoch number, or ISO 8601 string")
+
+
+def parsePtt_date(date_str, now=None):
+    """Mirror of ``sources/ptt.js`` ``parsePttDate``.
+
+    Parses a PTT ``" M/D"`` (no year) date string into an ISO 8601
+    timestamp.  Cross-year fallback: if the candidate (current year)
+    lands more than :data:`PTT_CROSS_YEAR_THRESHOLD_DAYS` away from
+    ``now``, assume the previous calendar year.  Empty / null /
+    unparseable input returns ``now`` as a defensive default.
+
+    The mirror is byte-for-byte equivalent to the production helper
+    modulo timezone (Python ``datetime`` vs JS ``Date``); both
+    represent the same UTC moment for matching wall-time inputs.
+    """
+    if not date_str or not isinstance(date_str, str):
+        return _iso_dt(_resolve_now(now))
+    s = date_str.strip()
+    match = _PTT_DATE_RE.match(s)
+    if not match:
+        return _iso_dt(_resolve_now(now))
+    month = int(match.group(1))
+    day = int(match.group(2))
+    if month < 1 or month > 12 or day < 1 or day > 31:
+        return _iso_dt(_resolve_now(now))
+    ref = _resolve_now(now)
+    year = ref.year
+    try:
+        candidate = datetime(year, month, day, tzinfo=timezone.utc)
+    except ValueError:
+        # Feb 30 etc. — fall back to defensive default.
+        return _iso_dt(_resolve_now(now))
+    diff_days = abs((ref - candidate).total_seconds()) / 86400.0
+    if diff_days > PTT_CROSS_YEAR_THRESHOLD_DAYS:
+        try:
+            candidate = datetime(year - 1, month, day, tzinfo=timezone.utc)
+        except ValueError:
+            return _iso_dt(_resolve_now(now))
+    return _iso_dt(candidate)
+
+
+def _iso_dt(value):
+    """Format a ``datetime`` to JS-style ISO 8601 (``...Z``, ms precision)."""
+    if not isinstance(value, datetime):
+        return _iso_now()
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    # Match JS ``Date.toISOString`` shape: ``YYYY-MM-DDTHH:MM:SS.sssZ``.
+    return (
+        value.astimezone(timezone.utc)
+        .isoformat(timespec="milliseconds")
+        .replace("+00:00", "Z")
+    )
+
+
+import re as _re
+_PTT_DATE_RE = _re.compile(r"^(\d{1,2})/(\d{1,2})$")
 
 
 def _to_non_negative_int(value):
@@ -188,19 +288,26 @@ def _iso_now():
 
 
 def _normalize_ptt(raw):
-    """Mirror of ``sources/ptt.js`` ``PttConnector.normalize``.
+    """Mirror of ``sources/ptt.js`` ``PttConnector.normalize`` (round-3 M1).
 
-    Production reads ``Number.isFinite(raw.pushes) ? raw.pushes : 0``,
-    i.e. **only** a real JS number survives — a numeric *string* is not
-    finite in that check and becomes ``0``.  Booleans are not numbers in
-    JS either, so they also become ``0``.  ``timestamp`` is stamped at
-    normalize time (``new Date().toISOString()``); ``source`` is the
-    connector's ``name``.
+    Round-3: time semantics split into ``posted_at`` (author's post time,
+    derived from the PTT ``" M/D"`` ``date`` column via
+    :func:`parsePtt_date`) and ``fetched_at`` (normalize-time stamp).
+    ``timestamp`` is preserved as a legacy alias of ``posted_at`` so
+    round-1+round-2 downstream consumers reading ``article.timestamp``
+    keep working without source-side changes.
+
+    ``Number.isFinite(raw.pushes) ? raw.pushes : 0`` — only a real
+    number survives (numeric string → 0; boolean → 0).  ``source`` is
+    the connector's name.
     """
     safe = raw or {}
     pushes = safe.get("pushes")
     if isinstance(pushes, bool) or not isinstance(pushes, (int, float)):
         pushes = 0
+
+    posted_at = parsePtt_date(safe.get("date"))
+    fetched_at = _iso_now()
 
     return {
         "title": safe.get("title") or "",
@@ -208,7 +315,9 @@ def _normalize_ptt(raw):
         "board": safe.get("board") or "",
         "author": safe.get("author") or "",
         "pushes": pushes,
-        "timestamp": _iso_now(),
+        "posted_at": posted_at,
+        "fetched_at": fetched_at,
+        "timestamp": posted_at,                    # legacy alias (round-3 M1)
         "source": "ptt",
         # Legacy extras preserved by the connector.
         "href": safe.get("href") or "",
@@ -232,8 +341,10 @@ def _normalize_dcard(raw):
     ``author``          ``user.nickname`` → ``user.id`` fallback
     ``pushes``/``heat`` ``reactionCount`` (NOT likeCount /
                         commentCount), clamped to a non-negative int
-    ``timestamp``       ``createdAt`` (ISO 8601) → ``now()`` fallback
-    ``date``            first 10 chars of timestamp (``YYYY-MM-DD``)
+    ``posted_at``       ``createdAt`` (ISO 8601) → ``now()`` fallback
+    ``fetched_at``      ``new Date().toISOString()`` at normalize time
+    ``timestamp``       legacy alias equal to ``posted_at`` (round-3 M1)
+    ``date``            first 10 chars of posted_at (``YYYY-MM-DD``)
     ``source``          literal ``'dcard'``
     ==================  ==========================================
     """
@@ -247,11 +358,12 @@ def _normalize_dcard(raw):
     title = safe.get("title") or ""
     author = user.get("nickname") or user.get("id") or ""
     pushes = _to_non_negative_int(safe.get("reactionCount"))
-    timestamp = safe.get("createdAt") or _iso_now()
+    posted_at = safe.get("createdAt") or _iso_now()
+    fetched_at = _iso_now()
 
     date = ""
-    if isinstance(timestamp, str) and len(timestamp) >= 10:
-        date = timestamp[:10]
+    if isinstance(posted_at, str) and len(posted_at) >= 10:
+        date = posted_at[:10]
 
     href = (
         "https://www.dcard.tw/f/{}/p/{}".format(forum_alias, post_id)
@@ -265,7 +377,9 @@ def _normalize_dcard(raw):
         "board": forum_name or forum_alias,
         "author": author,
         "pushes": pushes,
-        "timestamp": timestamp,
+        "posted_at": posted_at,
+        "fetched_at": fetched_at,
+        "timestamp": posted_at,                    # legacy alias (round-3 M1)
         "source": "dcard",
         # Legacy extras preserved by the connector.
         "date": date,

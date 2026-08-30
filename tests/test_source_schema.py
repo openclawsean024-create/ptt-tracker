@@ -135,7 +135,8 @@ def test_dcard_article_field_values_come_from_raw():
     assert article["board"] == source_raw["forum"]["name"]
     assert article["author"] == source_raw["user"]["nickname"]
     assert article["pushes"] == source_raw["reactionCount"]
-    assert article["timestamp"] == source_raw["createdAt"]
+    assert article["posted_at"] == source_raw["createdAt"]
+    assert article["timestamp"] == article["posted_at"]  # legacy alias
 
 
 def test_dcard_article_is_tagged_with_dcard_source():
