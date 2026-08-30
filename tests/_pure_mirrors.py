@@ -164,6 +164,119 @@ ARTICLE_KEYS = UNIFIED_ARTICLE_KEYS + LEGACY_ARTICLE_KEYS + (TIMESTAMP_ALIAS_KEY
 # sync with ``sources/ptt.js`` ``PTT_CROSS_YEAR_THRESHOLD_DAYS``.
 PTT_CROSS_YEAR_THRESHOLD_DAYS = 90
 
+# Round-3 M2: how generous PTT's since-filter is when an article's
+# ``posted_at`` falls *just* before the caller's cutoff.  Mirrors the
+# ``PTT_SINCE_GRACE_MS`` constant exported by ``sources/ptt.js`` —
+# 24 hours of slack so PTT's day-level date granularity (``" M/D"``)
+# doesn't drop a 3/27 post when the cutoff is the same day at 09:00.
+PTT_SINCE_GRACE_MS = 24 * 60 * 60 * 1000
+
+
+# ---------------------------------------------------------------------------
+# Round-3 M2 — since-filter mirrors (CLI + serverless + per-connector).
+# ---------------------------------------------------------------------------
+#
+# These mirror the three production helpers that the round-3 orchestrator
+# uses to thread a caller-supplied ``since`` ISO 8601 string through the
+# pipeline:
+#
+#   * ``normalizeSince`` (``tracker.js``) — trim + null-check the CLI /
+#     serverless input; the two surfaces share this single helper so a
+#     typo'd ``?since=`` query param is treated identically to a typo'd
+#     ``--since`` flag.
+#   * ``parseSinceMs`` (``sources/ptt.js``) — convert an ISO 8601 string
+#     to epoch-ms; ``null`` (NOT NaN) on unparseable input so the
+#     connector's filter can short-circuit safely.
+#   * ``buildSinceQuery`` (``sources/dcard.js``) — build the
+#     ``&after=<ISO>`` query-string suffix Dcard's API consumes
+#     server-side; ``''`` for null / empty / unparseable input so the
+#     URL never carries garbage.
+#
+# All three return ``None`` / ``''`` on the same set of "bad" inputs as
+# the JS implementations (round-1 fallback: no time filter).
+
+
+def normalize_since(raw_since):
+    """Mirror of ``tracker.js`` ``normalizeSince`` (CLI + serverless shared).
+
+    Shared between ``tracker.js`` (CLI ``--since`` flag) and
+    ``api/tracker.js`` (serverless ``?since=`` query param).  Returns
+    ``None`` for ``None`` / non-string / empty / whitespace-only input
+    (round-1 fallback: no time filter).  Otherwise returns the trimmed
+    string verbatim — the connector decides whether the ISO 8601 is
+    actually parseable.
+    """
+    if raw_since is None:
+        return None
+    if not isinstance(raw_since, str):
+        return None
+    trimmed = raw_since.strip()
+    if not trimmed:
+        return None
+    return trimmed
+
+
+def parse_since_ms(raw_since):
+    """Mirror of ``sources/ptt.js`` ``parseSinceMs``.
+
+    ISO 8601 string → epoch-ms (int / float).  ``None`` (NOT NaN) on
+    unparseable input so the connector's filter logic can short-circuit
+    safely.  Tolerant ``Z`` suffix (``2026-01-01T00:00:00.000Z``) and
+    explicit ``+00:00`` both parse correctly.
+    """
+    if raw_since is None:
+        return None
+    if isinstance(raw_since, datetime):
+        if raw_since.tzinfo is None:
+            raw_since = raw_since.replace(tzinfo=timezone.utc)
+        ms = raw_since.timestamp() * 1000.0
+        return ms if ms == ms else None  # NaN guard
+    if not isinstance(raw_since, str):
+        return None
+    trimmed = raw_since.strip()
+    if not trimmed:
+        return None
+    # Mirror JS ``Date.parse`` — accept ``Z`` suffix via ``fromisoformat``.
+    text = trimmed
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    ms = dt.timestamp() * 1000.0
+    return ms if ms == ms else None
+
+
+def build_since_query(raw_since):
+    """Mirror of ``sources/dcard.js`` ``buildSinceQuery``.
+
+    Builds the ``&after=<ISO>`` suffix that Dcard's API consumes
+    server-side.  Empty string (``''``) for ``None`` / non-string /
+    empty / whitespace-only / unparseable input — the URL never carries
+    garbage, and the round-1 behaviour ("no ``after`` query param")
+    falls out naturally.
+    """
+    if raw_since is None:
+        return ""
+    if not isinstance(raw_since, str):
+        return ""
+    trimmed = raw_since.strip()
+    if not trimmed:
+        return ""
+    if parse_since_ms(trimmed) is None:
+        return ""
+    # Match ``encodeURIComponent`` shape — escape a minimal set of
+    # characters; the input is expected to be an ISO 8601 string so the
+    # only character that realistically needs escaping is ``:`` (and
+    # only when callers pass a date with ``+`` offset), but we mirror
+    # JS's behaviour exactly: keep alphanumerics + ``-._~`` verbatim,
+    # percent-encode everything else.
+    from urllib.parse import quote
+    return "&after=" + quote(trimmed, safe="")
+
 
 def _resolve_now(now):
     """Mirror of ``sources/ptt.js`` ``resolveNow``.
@@ -392,6 +505,84 @@ _NORMALIZERS = {
     "ptt": _normalize_ptt,
     "dcard": _normalize_dcard,
 }
+
+
+def apply_since_filter_ptt(articles, since_raw):
+    """Mirror of ``sources/ptt.js`` ``PttConnector.fetch`` since-filter logic.
+
+    Filters a list of PTT raw articles (``{date: " M/D", ...}`` shape)
+    to keep only those whose parsed ``posted_at`` (via
+    :func:`parsePtt_date`) is within ``PTT_SINCE_GRACE_MS`` of the
+    caller's ``since`` cutoff.
+
+    Behaviour matches the production helper:
+
+      * ``since_raw`` ``None`` / empty / whitespace / unparseable →
+        **all** articles survive (round-1 fallback, no filter applied;
+        ``thresholdMs == None`` in the JS code path).
+      * An article whose parsed ``posted_at`` is unparseable keeps
+        the article (defensive default in :func:`parsePtt_date` means
+        this only fires on truly corrupt input).
+      * Otherwise: keeps articles whose ``posted_at_ms >= since_ms -
+        PTT_SINCE_GRACE_MS`` (i.e. inside the 24h grace window).
+
+    Note
+    ----
+    The JS production code calls ``Date.parse(parsePttDate(article.date))``
+    inline — there is no separately named ``applySinceFilter`` helper.
+    The ``now`` reference is the actual wall-clock at ``fetch`` time, so
+    callers wanting deterministic tests should pin ``now`` via the
+    ``ctx.now`` parameter to ``PttConnector.fetch``.  This Python mirror
+    uses ``now=None`` (wall clock) for raw-mode parity.
+    """
+    since_ms = parse_since_ms(since_raw)
+    if since_ms is None:
+        return list(articles)
+
+    threshold_ms = since_ms - PTT_SINCE_GRACE_MS
+    out = []
+    for art in articles:
+        posted_iso = parsePtt_date((art or {}).get("date"))
+        candidate_ms = parse_since_ms(posted_iso)
+        # Defensive: if posted_at is unparseable, keep the article.
+        if candidate_ms is None or candidate_ms >= threshold_ms:
+            out.append(art)
+    return out
+
+
+def filter_by_posted_at(articles, since_raw):
+    """PTT-style grace-filter on already-normalized Articles.
+
+    Mirrors the *post-condition* of ``sources/ptt.js`` ``PttConnector.fetch``
+    on normalized Articles: keeps any article whose ``posted_at`` (ISO 8601)
+    is within ``PTT_SINCE_GRACE_MS`` (24h) of the caller's ``since`` cutoff.
+
+    Used by the round-3 M3 fixture tests because they assert on the
+    Article ``posted_at`` field (which is already an ISO 8601 string in
+    the normalized schema), rather than on the raw PTT ``" M/D"`` ``date``
+    column.  Behaviour:
+
+      * ``since_raw`` ``None`` / empty / whitespace / unparseable →
+        **all** articles survive (round-1 fallback, no filter applied).
+      * Article with ``posted_at`` ``None`` / unparseable / missing →
+        kept (defensive default — we don't silently drop data).
+      * Article with ``posted_at`` ``>= since - 24h`` → kept.
+      * Article with ``posted_at`` ``< since - 24h`` → dropped (outside
+        the 24h grace window).
+    """
+    since_ms = parse_since_ms(since_raw)
+    if since_ms is None:
+        return list(articles)
+
+    threshold_ms = since_ms - PTT_SINCE_GRACE_MS
+    out = []
+    for art in articles:
+        posted = (art or {}).get("posted_at")
+        candidate_ms = parse_since_ms(posted)
+        # Defensive: if posted_at is None / unparseable, keep the article.
+        if candidate_ms is None or candidate_ms >= threshold_ms:
+            out.append(art)
+    return out
 
 
 def normalize_article(source_name, raw):
