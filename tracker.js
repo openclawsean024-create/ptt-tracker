@@ -207,6 +207,13 @@ function formatTelegramArticle(article) {
 // MultiSourceTracker — instantiates the requested connectors, fans out
 // ``fetch`` over them, then normalizes + merges + dedups.  Mirrors the
 // round-1 ``checkBoards`` contract: returns ``{ newArticles, keywordMatches }``.
+//
+// Round-3 M2: ``ctx`` (the second positional argument) propagates
+// ``since`` / ``limit`` to each connector's ``fetch``.  ``since`` is an
+// ISO 8601 string (e.g. ``"2026-01-01T00:00:00.000Z"``) or ``null`` for
+// the round-1 default ("no time filter, just take the freshest N
+// posts").  Each source decides how to honour ``since`` — PTT applies a
+// 24h grace client-side, Dcard forwards it as ``?after=<ISO>``.
 // ---------------------------------------------------------------------------
 
 function matchKeywords(title, keywords) {
@@ -215,7 +222,28 @@ function matchKeywords(title, keywords) {
   return keywords.some(keyword => titleLower.includes(String(keyword).toLowerCase()));
 }
 
-async function checkSources(config) {
+/**
+ * Normalize the CLI / programmatic ``since`` value.
+ *
+ *   * ``null`` / ``undefined`` / empty string → ``null`` (round-1
+ *     behaviour: "no time filter").
+ *   * ISO 8601 string → returned verbatim after a parseability probe;
+ *     if ``Date.parse`` rejects it we still pass the original string
+ *     through (connectors that try to use it will surface their own
+ *     error) so the CLI doesn't crash on a typo.
+ *
+ * Kept as a tiny standalone helper (no validation side effects) so
+ * ``api/tracker.js`` can reuse it for the query-string path.
+ */
+function normalizeSince(rawSince) {
+  if (rawSince == null) return null;
+  if (typeof rawSince !== 'string') return null;
+  const trimmed = rawSince.trim();
+  if (!trimmed) return null;
+  return trimmed;
+}
+
+async function checkSources(config, ctx = {}) {
   const sources = resolveSources(config);
   const minHeat = config.min_heat ?? 1;
   const keywords = config.keywords || [];
@@ -224,9 +252,19 @@ async function checkSources(config) {
   const keywordMatches = [];
   const registry = buildConnectorRegistry();
 
+  // Round-3 M2: ``since`` flows from the caller (CLI flag or serverless
+  // query param) down to each connector's ``fetch``.  Null → round-1
+  // behaviour.  Also threaded through as ``ctx.since`` so any source
+  // that wants it during ``normalize`` can read it from one place.
+  const since = normalizeSince(ctx.since);
+  const limit = Number.isFinite(ctx.limit) ? ctx.limit : 30;
+
   console.log(`\n📋 Checking sources: ${sources.join(', ')}`);
   if (sources.length === 0) {
     return { newArticles, keywordMatches };
+  }
+  if (since) {
+    console.log(`⏱️  since-filter: ${since}`);
   }
 
   for (const name of sources) {
@@ -244,7 +282,11 @@ async function checkSources(config) {
     let rawPosts = [];
     try {
       // eslint-disable-next-line no-await-in-loop
-      rawPosts = await connector.fetch({ since: null, limit: 30, ctx: { config } });
+      rawPosts = await connector.fetch({
+        since,
+        limit,
+        ctx: { config, since },
+      });
     } catch (error) {
       console.log(`  ❌ Error fetching '${name}': ${error && error.message ? error.message : error}`);
       rawPosts = [];
@@ -287,11 +329,19 @@ async function checkSources(config) {
 // downstream importer of the round-1 API surface still works.
 // ---------------------------------------------------------------------------
 
-async function checkBoards(config) {
-  return checkSources(config);
+async function checkBoards(config, ctx) {
+  return checkSources(config, ctx);
 }
 
-async function run(config) {
+/**
+ * Top-level orchestrator entry point.  Round-3 M2 adds an optional
+ * ``ctx`` argument (``{ since, limit }``) that propagates a
+ * ``since`` ISO 8601 cutoff to every connector.  Round-1 callers
+ * passing only ``config`` keep working — ``ctx`` defaults to ``{}``.
+ */
+async function run(config, ctx = {}) {
+  const since = normalizeSince(ctx.since);
+
   console.log('==================================================');
   console.log('🤖 PTT Tracker Started');
   console.log('==================================================');
@@ -299,9 +349,12 @@ async function run(config) {
   console.log(`📌 Boards: ${(config.boards || []).join(', ') || '(source defaults)'}`);
   console.log(`🔑 Keywords: ${(config.keywords || []).join(', ') || 'None'}`);
   console.log(`🔥 Min Heat: ${config.min_heat ?? 1}`);
+  if (since) {
+    console.log(`⏱️  since: ${since}`);
+  }
   debugLog('--------------------------------------------------');
 
-  const { newArticles, keywordMatches } = await checkSources(config);
+  const { newArticles, keywordMatches } = await checkSources(config, { since, limit: ctx.limit });
 
   if (keywordMatches.length > 0) {
     console.log('\n🎯 KEYWORD MATCHES:');
@@ -332,6 +385,30 @@ async function run(config) {
   return { newArticles, keywordMatches };
 }
 
+/**
+ * Parse the flat ``--key value`` argv stream into a plain object.
+ * Recognised keys (round-3 M2): ``--since <ISO>``.  Unknown flags are
+ * ignored — round-1 callers that still pass ``--watch`` / ``-w`` skip
+ * this loop entirely because we branch on the *first* arg before
+ * scanning.
+ *
+ * ``--since`` accepts an ISO 8601 string (``2026-01-01T00:00:00.000Z``)
+ * and threads it through ``run(config, { since })``.  ``null`` /
+ * missing → round-1 default (no time filter).
+ */
+function parseCliFlags(args) {
+  const out = {};
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i];
+    if (arg === '--since') {
+      const next = args[i + 1];
+      out.since = next != null ? next : null;
+      i += 1;
+    }
+  }
+  return out;
+}
+
 async function main() {
   const args = process.argv.slice(2);
   const config = loadConfig();
@@ -341,9 +418,10 @@ async function main() {
     console.log(`\n👀 Watch mode: checking every ${interval} minutes`);
     console.log('Press Ctrl+C to stop\n');
 
+    const flags = parseCliFlags(args.slice(2));
     async function loop() {
       try {
-        await run(config);
+        await run(config, flags);
       } catch (error) {
         debugError(`[loop] ${error && error.message ? error.message : error}`);
       }
@@ -355,7 +433,8 @@ async function main() {
     return;
   }
 
-  await run(config);
+  const flags = parseCliFlags(args);
+  await run(config, flags);
 }
 
 if (require.main === module) {
@@ -368,6 +447,11 @@ if (require.main === module) {
 module.exports = {
   run,
   checkBoards,
+  checkSources,
+  // Round-3 M2: ``normalizeSince`` is shared with ``api/tracker.js``
+  // (serverless query-param path) so the two surfaces treat the same
+  // ISO 8601 string identically.
+  normalizeSince,
   // Backwards-compat exports — round-1 callers that imported these helpers
   // directly (none of the 37 pytest tests do, but ``app.js`` style
   // consumers might).  Re-exported from ``sources/ptt.js`` so the legacy

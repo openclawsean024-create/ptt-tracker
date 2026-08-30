@@ -70,6 +70,24 @@ const DEFAULT_TIMEOUT_MS = 15000;
 const DEFAULT_RETRIES = 3;
 const DEFAULT_USER_AGENT = 'ptt-tracker/dcard-connector (round-2 M2)';
 
+// Round-3 M2: Dcard's per-forum endpoint natively supports an
+// ``after`` query param (``https://www.dcard.tw/_api/forums/{alias}/posts
+// ?popular=true&limit=30&after=2026-01-01T00:00:00.000Z``) which
+// transparently drops posts with ``createdAt < after`` server-side.
+// We append it whenever the orchestrator passes a non-null ``since``;
+// ``null`` / missing → no ``after`` param (round-1 behaviour).
+function buildSinceQuery(since) {
+  if (since == null) return '';
+  if (typeof since !== 'string') return '';
+  const trimmed = since.trim();
+  if (!trimmed) return '';
+  // ``Date.parse`` is a quick sanity check; Dcard will reject truly
+  // malformed values on its own, but we don't want to silently emit a
+  // garbage query string.
+  if (!Number.isFinite(Date.parse(trimmed))) return '';
+  return `&after=${encodeURIComponent(trimmed)}`;
+}
+
 // ---------------------------------------------------------------------------
 // Pure helpers — exported so round-3 fixture / unit tests can drive them
 // without ever touching the network.  ``normalizeArticle`` is the Python
@@ -227,7 +245,10 @@ class DcardConnector extends SourceConnector {
     const forums = Array.isArray(dcardConfig.forums) && dcardConfig.forums.length > 0
       ? dcardConfig.forums
       : DEFAULT_FORUMS;
-    void since; // Dcard popular=true is always most-recent-first; no since filter
+    // Round-3 M2: ``since`` is forwarded as a native ``?after=<ISO>``
+    // query param.  Dcard's API drops posts with ``createdAt < after``
+    // server-side, so we don't need any client-side post-filter.
+    const sinceQuery = buildSinceQuery(since);
 
     if (!this._fetchEnabled) {
       this._debugLog('[dcard] fetch disabled (DCARD_FETCH_ENABLED != 1) — returning []');
@@ -236,7 +257,7 @@ class DcardConnector extends SourceConnector {
 
     const out = [];
     for (const forumAlias of forums) {
-      const posts = await this._fetchForum(forumAlias, limit);
+      const posts = await this._fetchForum(forumAlias, limit, sinceQuery);
       for (const post of posts) {
         out.push(this._attachForumAlias(post, forumAlias));
       }
@@ -247,9 +268,13 @@ class DcardConnector extends SourceConnector {
   /**
    * Per-forum fetch with retry.  Errors are swallowed (logged) so a
    * single broken forum does not lose the rest of the run.
+   *
+   * Round-3 M2: ``sinceQuery`` (built by ``buildSinceQuery``) is
+   * appended to the request path — empty string when ``since`` is
+   * absent (round-1 behaviour) or unparseable.
    */
-  async _fetchForum(forumAlias, limit) {
-    const path = `/_api/forums/${encodeURIComponent(forumAlias)}/posts?popular=true&limit=${encodeURIComponent(limit)}`;
+  async _fetchForum(forumAlias, limit, sinceQuery = '') {
+    const path = `/_api/forums/${encodeURIComponent(forumAlias)}/posts?popular=true&limit=${encodeURIComponent(limit)}${sinceQuery}`;
     let lastError;
     for (let attempt = 1; attempt <= DEFAULT_RETRIES; attempt += 1) {
       try {
@@ -308,6 +333,11 @@ module.exports = {
   DcardConnector,
   normalizeArticle,
   buildPostUrl,
+  // Round-3 M2: exposed so the (future) mirror test suite can pin the
+  // query-string shape (round-3 M3 fixture will assert ``after=``
+  // appears verbatim when a valid since is passed and is omitted for
+  // ``null``).
+  buildSinceQuery,
   DEFAULT_FORUMS,
   DCARD_HOST,
 };

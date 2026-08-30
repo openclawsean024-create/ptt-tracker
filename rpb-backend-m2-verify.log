@@ -1,87 +1,114 @@
-=== rpb-backend-m2-verify.log — round-2 M2 — Dcard connector ===
+==================================================================
+rpb(backend) — round-3 / Milestone 2 verify
+branch: rpb/round-3-v3-since  (NOT pushed)
+date:   2026-08-30T15:06:51Z
+==================================================================
 
-## scope
-- NEW:   sources/dcard.js
-- MOD:   tracker.js                (+1 import, +1 registry entry, -2 commented placeholder lines)
-- MOD:   api/tracker.js            (+1 import, +1 registry entry, -1 commented placeholder line)
-- MOD:   config.example.json       (dcard enabled: false → true, added forums, sources note)
-- MOD:   .env.example              (DCARD_FETCH_ENABLED, DCARD_USER_AGENT docs)
-- NEW:   rpb-backend-m2-verify.log (this file)
+=== 1. node --check (all production JS) ===
+  OK  tracker.js
+  OK  api/tracker.js
+  OK  sources/SourceConnector.js
+  OK  sources/dcard.js
+  OK  sources/ptt.js
+exit: 0
 
-## git identity
-- branch: rpb/round-2-v3-mvp
-- author: rpb-orchestrator <rpb@local>
+=== 2. python3 -m compileall . ===
+compileall exit: 0
 
-## [1/5] node --check (5 files)
-  tracker.js: OK
-  api/tracker.js: OK
-  sources/SourceConnector.js: OK
-  sources/ptt.js: OK
-  sources/dcard.js: OK
-  exit: 0
-
-## [2/5] python3 -m compileall .
-Listing './.pytest_cache/v/cache'...
-Listing './PRD'...
-Listing './api'...
-Listing './sources'...
-Listing './tests'...
-  exit: 0
-
-## [3/5] python3 -m pytest -q (existing 37 tests must stay green)
-  /Users/sean/Library/Python/3.9/lib/python/site-packages/urllib3/__init__.py:35: NotOpenSSLWarning: urllib3 v2 only supports OpenSSL 1.1.1+, currently the 'ssl' module is compiled with 'LibreSSL 2.8.3'. See: https://github.com/urllib3/urllib3/issues/3020
-    warnings.warn(
+=== 3. python3 -m pytest -q (round-1+2 baseline) ===
 
 -- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
-37 passed, 1 warning in 0.11s
-  exit: 0
+105 passed, 1 warning in 0.15s
 
-## [4/5] JS smoke — Dcard connector contract + normalize
-## Dcard connector smoke
-  ✓ DcardConnector is class
-  ✓ normalizeArticle is function
-  ✓ DEFAULT_FORUMS === [3c, trending]
-  ✓ DCARD_HOST === www.dcard.tw
-  ✓ buildPostUrl ok
-  ✓ extends SourceConnector
-  ✓ name === dcard
-  ✓ enabled default true
-  ✓ healthcheck() returns ok
-  ✓ enabled=false when config says so
-  ✓ article has 10 keys (7 unified + 3 legacy)
-  ✓ article.title ok
-  ✓ article.url ok
-  ✓ article.board is forumName
-  ✓ article.author is user.nickname
-  ✓ article.pushes === reactionCount
-  ✓ article.heat === pushes alias
-  ✓ article.timestamp is ISO 8601
-  ✓ article.date is YYYY-MM-DD
-  ✓ article.source === dcard
-  ✓ sparse raw — title defaults ""
-  ✓ sparse raw — pushes defaults 0
-  ✓ sparse raw — timestamp is ISO now
-  ✓ sparse raw — source is dcard
-  ✓ sparse raw — has all 7 unified keys
-  ✓ author fallback to user.id
-  ✓ bad reactionCount → 0
-  ✓ fetch returns [] when gated off
-  ✓ fetch returns [] with default forums (gated off)
-  ✓ _attachForumAlias back-fills forumAlias
-  ✓ _attachForumAlias preserves existing forumAlias
---- 31 checks passed, 0 failed
-  exit: 0
+=== 4. Grep evidence — since flag/query wired end-to-end ===
+tracker.js:212:// ``since`` / ``limit`` to each connector's ``fetch``.  ``since`` is an
+tracker.js:215:// posts").  Each source decides how to honour ``since`` — PTT applies a
+tracker.js:216:// 24h grace client-side, Dcard forwards it as ``?after=<ISO>``.
+tracker.js:226: * Normalize the CLI / programmatic ``since`` value.
+tracker.js:255:  // Round-3 M2: ``since`` flows from the caller (CLI flag or serverless
+tracker.js:257:  // behaviour.  Also threaded through as ``ctx.since`` so any source
+tracker.js:259:  const since = normalizeSince(ctx.since);
+tracker.js:266:  if (since) {
+tracker.js:267:    console.log(`⏱️  since-filter: ${since}`);
+tracker.js:286:        since,
+tracker.js:288:        ctx: { config, since },
+tracker.js:338: * ``ctx`` argument (``{ since, limit }``) that propagates a
+tracker.js:339: * ``since`` ISO 8601 cutoff to every connector.  Round-1 callers
+tracker.js:343:  const since = normalizeSince(ctx.since);
+tracker.js:352:  if (since) {
+tracker.js:353:    console.log(`⏱️  since: ${since}`);
+tracker.js:357:  const { newArticles, keywordMatches } = await checkSources(config, { since, limit: ctx.limit });
+tracker.js:390: * Recognised keys (round-3 M2): ``--since <ISO>``.  Unknown flags are
+tracker.js:395: * ``--since`` accepts an ISO 8601 string (``2026-01-01T00:00:00.000Z``)
+tracker.js:396: * and threads it through ``run(config, { since })``.  ``null`` /
+tracker.js:403:    if (arg === '--since') {
+tracker.js:405:      out.since = next != null ? next : null;
+api/tracker.js:30:// honest about what counts as a "valid since value".  Re-exported
+api/tracker.js:89:  // Round-3 M2: ``since`` flows from the ``?since=<ISO>`` query param
+api/tracker.js:92:  const since = normalizeSince(ctx.since);
+api/tracker.js:115:        since,
+api/tracker.js:117:        ctx: { config, since },
+api/tracker.js:160:    // Round-3 M2: serverless entrypoint accepts ``?since=<ISO>`` as a
+api/tracker.js:165:    const since = req.query && req.query.since;
+api/tracker.js:166:    const result = await checkSources(config, { since });
+api/tracker.js:173:      // Round-3 M2: echo the parsed ``since`` so callers can confirm
+api/tracker.js:175:      since: normalizeSince(since),
+sources/SourceConnector.js:26: *   async fetch({ since, limit, ctx }) -> Array<RawPost>
+sources/SourceConnector.js:27: *     Pull raw posts from the platform.  ``since`` is an optional epoch-ms
+sources/SourceConnector.js:52: *         fallback).  This is the field round-3 ``since``-filtering
+sources/dcard.js:77:// We append it whenever the orchestrator passes a non-null ``since``;
+sources/dcard.js:79:function buildSinceQuery(since) {
+sources/dcard.js:80:  if (since == null) return '';
+sources/dcard.js:81:  if (typeof since !== 'string') return '';
+sources/dcard.js:82:  const trimmed = since.trim();
+sources/dcard.js:243:  async fetch({ since = null, limit = DEFAULT_LIMIT, ctx = {} } = {}) {
+sources/dcard.js:248:    // Round-3 M2: ``since`` is forwarded as a native ``?after=<ISO>``
+sources/dcard.js:251:    const sinceQuery = buildSinceQuery(since);
+sources/dcard.js:260:      const posts = await this._fetchForum(forumAlias, limit, sinceQuery);
+sources/dcard.js:272:   * Round-3 M2: ``sinceQuery`` (built by ``buildSinceQuery``) is
+sources/dcard.js:273:   * appended to the request path — empty string when ``since`` is
+sources/dcard.js:276:  async _fetchForum(forumAlias, limit, sinceQuery = '') {
+sources/dcard.js:277:    const path = `/_api/forums/${encodeURIComponent(forumAlias)}/posts?popular=true&limit=${encodeURIComponent(limit)}${sinceQuery}`;
+sources/dcard.js:338:  // appears verbatim when a valid since is passed and is omitted for
+sources/ptt.js:56:// Round-3 M1: deterministic helper for tests / M2 since-filtering that
+sources/ptt.js:67:// falls *just* before the caller-supplied ``since`` cutoff.  PTT's
+sources/ptt.js:75: * Round-3 M2: parse a caller-supplied ``since`` (ISO 8601 string from
+sources/ptt.js:138:// Exported so M2's since-filtering can re-derive posted_at from raw
+sources/ptt.js:279:  async fetch({ since = null, limit = 30, ctx = {} } = {}) {
+sources/ptt.js:281:    // Round-3 M2: ``since`` filtering is applied **after** the board
+sources/ptt.js:283:    // no native ``?after=`` query param, so we pull the freshest
+sources/ptt.js:285:    // is older than ``since - 24h``.  The 24h grace absorbs PTT's
+sources/ptt.js:295:    const sinceMs = parseSinceMs(since);
+sources/ptt.js:296:    const thresholdMs = sinceMs == null ? null : sinceMs - PTT_SINCE_GRACE_MS;
+sources/ptt.js:335:    // ``ctx.now`` lets callers (and M2 since-filtering) pin a fake
 
-## [5/5] no real Dcard network calls in source code
-  (gate: fetch() short-circuits to [] when DCARD_FETCH_ENABLED != 1)
-  (grep confirms only the URL PATH string is referenced; no fetch() calls execute in default mode)
-  grep -rnE 'fetch\(.*dcard\.tw' sources/dcard.js :
-    (no matches — correct, no actual fetch hits dcard.tw in default mode)
-  exit: 0
+=== 5. Smoke: normalizeSince contract (7/7) ===
+normalizeSince: 7/7 pass
 
-## summary
-  - node --check: 5/5 OK
-  - compileall: 0 errors
-  - pytest: 37 passed (no regressions)
-  - dcard smoke: 31 checks, 0 failed
-  - zero outbound HTTPS to dcard.tw in default mode (env-gated)
+=== 6. Smoke: PTT since filter (4/4 cases) ===
+PTT filter: 4/4 pass
+
+=== 7. Smoke: Dcard since query (3/3 cases) ===
+Dcard query: 3/3 pass
+
+=== 8. Files changed + LOC ===
+ api/tracker.js   |  29 ++++++++++++++--
+ sources/dcard.js |  38 ++++++++++++++++++---
+ sources/ptt.js   |  68 ++++++++++++++++++++++++++++++++++---
+ tracker.js       | 100 ++++++++++++++++++++++++++++++++++++++++++++++++++-----
+ 4 files changed, 215 insertions(+), 20 deletions(-)
+
+=== 9. No outbound HTTP calls ===
+  (only SourceConnector .fetch() contract calls — no https.request to ptt.cc / dcard.tw)
+sources/ptt.js:279:  async fetch({ since = null, limit = 30, ctx = {} } = {}) {
+sources/SourceConnector.js:26: *   async fetch({ since, limit, ctx }) -> Array<RawPost>
+sources/SourceConnector.js:99:  async fetch(_args) {
+sources/dcard.js:243:  async fetch({ since = null, limit = DEFAULT_LIMIT, ctx = {} } = {}) {
+tracker.js:285:      rawPosts = await connector.fetch({
+api/tracker.js:114:      rawPosts = await connector.fetch({
+
+==================================================================
+Verify complete. 105 pytest still green; node --check green;
+since flag wired CLI (--since) + serverless (?since=);
+PTT 24h grace client-side filter; Dcard ?after= server-side.
+==================================================================

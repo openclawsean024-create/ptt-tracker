@@ -63,6 +63,34 @@ function resolveNow(now) {
   return new Date(now);
 }
 
+// Round-3 M2: how generous to be when a PTT post's ``posted_at``
+// falls *just* before the caller-supplied ``since`` cutoff.  PTT's
+// board index only carries an ``M/D`` date (no hours/minutes) so an
+// article stamped "3/27" actually covers the *whole* day.  Subtracting
+// 24h ensures we never drop an article whose day-level granularity
+// hides the real post time inside the filter window.
+const PTT_SINCE_GRACE_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Round-3 M2: parse a caller-supplied ``since`` (ISO 8601 string from
+ * CLI / query param) into epoch-ms, or return ``null`` for the
+ * round-1 "no filter" sentinel.  Returns ``null`` (NOT NaN) on
+ * unparseable input so the connector's filter logic can short-circuit
+ * safely.
+ */
+function parseSinceMs(rawSince) {
+  if (rawSince == null) return null;
+  if (rawSince instanceof Date) {
+    const ms = rawSince.getTime();
+    return Number.isFinite(ms) ? ms : null;
+  }
+  if (typeof rawSince !== 'string') return null;
+  const trimmed = rawSince.trim();
+  if (!trimmed) return null;
+  const ms = Date.parse(trimmed);
+  return Number.isFinite(ms) ? ms : null;
+}
+
 // ---------------------------------------------------------------------------
 // Pure helpers (identical to round-1 — mirrors in tests/_pure_mirrors.py pin
 // their semantics; changing any of these is a contract change).
@@ -250,17 +278,43 @@ class PttConnector extends SourceConnector {
 
   async fetch({ since = null, limit = 30, ctx = {} } = {}) {
     const boards = (ctx.config && ctx.config.boards) || DEFAULT_BOARDS;
-    // ``since`` is accepted for API symmetry with future sources; PTT's
-    // board index page is always "most-recent-first" so we just ``slice``
-    // to the per-board ``limit`` and let callers filter downstream.
-    void since;
+    // Round-3 M2: ``since`` filtering is applied **after** the board
+    // index fetch — PTT's board page is always "most-recent-first" with
+    // no native ``?after=`` query param, so we pull the freshest
+    // ``limit`` entries and drop anything whose parsed ``posted_at``
+    // is older than ``since - 24h``.  The 24h grace absorbs PTT's
+    // day-level date granularity (``" M/D"``) so an article stamped
+    // 3/27 at the start of the day isn't wrongly excluded when the
+    // caller's cutoff is the same day at 09:00.
+    //
+    // When ``posted_at`` is unparseable (empty ``raw.date``) we err on
+    // the side of **keeping** the article — defensive, matches the
+    // round-2 normalize contract that always returns a parseable
+    // ``posted_at`` even when the raw date is missing (falls back to
+    // ``now``).
+    const sinceMs = parseSinceMs(since);
+    const thresholdMs = sinceMs == null ? null : sinceMs - PTT_SINCE_GRACE_MS;
+
     const out = [];
     for (const board of boards) {
       try {
         this._debugLog(`[ptt] checking ${board}…`);
         // eslint-disable-next-line no-await-in-loop
         const articles = await getBoardArticles(board, limit);
-        out.push(...articles);
+        if (thresholdMs == null) {
+          out.push(...articles);
+          continue;
+        }
+        for (const article of articles) {
+          const candidateMs = Date.parse(parsePttDate(article.date));
+          // Defensive: if ``posted_at`` is unparseable keep the
+          // article — round-2 normalize contract guarantees
+          // ``parsePttDate`` returns a valid ISO string even for empty
+          // input, so this branch only fires on truly corrupt data.
+          if (!Number.isFinite(candidateMs) || candidateMs >= thresholdMs) {
+            out.push(article);
+          }
+        }
       } catch (error) {
         this._debugLog(`[ptt] error on ${board}: ${error && error.message ? error.message : error}`);
       }
@@ -316,6 +370,10 @@ module.exports = {
   parseArticles,
   parsePttDate,
   getBoardArticles,
+  // Round-3 M2: ``parseSinceMs`` + ``PTT_SINCE_GRACE_MS`` exposed for
+  // the (future) mirror tests that need to pin the grace window.
+  parseSinceMs,
+  PTT_SINCE_GRACE_MS,
   DEFAULT_BOARDS,
   PTT_BASE_URL,
   PTT_CROSS_YEAR_THRESHOLD_DAYS,

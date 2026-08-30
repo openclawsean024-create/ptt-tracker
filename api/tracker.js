@@ -26,6 +26,10 @@ const path = require('path');
 const { PttConnector } = require('../sources/ptt');
 const { DcardConnector } = require('../sources/dcard');
 const { resolveSources } = require('../sources/SourceConnector');
+// Round-3 M2: ``normalizeSince`` keeps the CLI / serverless surfaces
+// honest about what counts as a "valid since value".  Re-exported
+// from ``tracker.js`` so the two paths agree on the contract.
+const { normalizeSince } = require('../tracker');
 
 const CONFIG_FILE = path.join(__dirname, '..', 'config.json');
 const DEFAULT_BOARDS = ['MacShop'];
@@ -74,13 +78,19 @@ function buildConnectorRegistry() {
   };
 }
 
-async function checkSources(config) {
+async function checkSources(config, ctx = {}) {
   const sources = resolveSources(config);
   const minHeat = config.min_heat ?? 1;
   const keywords = config.keywords || [];
   const newArticles = [];
   const keywordMatches = [];
   const registry = buildConnectorRegistry();
+
+  // Round-3 M2: ``since`` flows from the ``?since=<ISO>`` query param
+  // through to each connector's ``fetch``.  Same contract as the CLI
+  // path (``null`` → round-1 behaviour, ISO 8601 → honour it).
+  const since = normalizeSince(ctx.since);
+  const limit = Number.isFinite(ctx.limit) ? ctx.limit : 30;
 
   if (sources.length === 0) {
     return { newArticles, keywordMatches };
@@ -101,7 +111,11 @@ async function checkSources(config) {
     let rawPosts = [];
     try {
       // eslint-disable-next-line no-await-in-loop
-      rawPosts = await connector.fetch({ since: null, limit: 30, ctx: { config } });
+      rawPosts = await connector.fetch({
+        since,
+        limit,
+        ctx: { config, since },
+      });
     } catch (error) {
       debugError(`[api/tracker] fetch error on '${name}': ${error && error.message ? error.message : error}`);
       rawPosts = [];
@@ -143,13 +157,22 @@ module.exports = async (req, res) => {
 
   try {
     const config = loadConfig();
-    const result = await checkSources(config);
+    // Round-3 M2: serverless entrypoint accepts ``?since=<ISO>`` as a
+    // query param.  ``req.query`` is Vercel's parsed querystring (also
+    // works in raw ``http.IncomingMessage`` because Vercel polyfills
+    // it).  We pass the raw value straight through; ``normalizeSince``
+    // trims / null-checks before it reaches any connector.
+    const since = req.query && req.query.since;
+    const result = await checkSources(config, { since });
 
     return res.status(200).json({
       success: true,
       timestamp: new Date().toISOString(),
       keywordMatches: result.keywordMatches || [],
       hotArticles: (result.newArticles || []).sort((a, b) => b.pushes - a.pushes).slice(0, 20),
+      // Round-3 M2: echo the parsed ``since`` so callers can confirm
+      // what filter the server actually applied (null → round-1 mode).
+      since: normalizeSince(since),
     });
   } catch (error) {
     debugError(`[api/tracker] top-level error: ${error && error.message ? error.message : error}`);
