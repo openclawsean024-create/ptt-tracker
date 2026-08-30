@@ -1,0 +1,21 @@
+branch: main
+HEAD: fb786c56cc8b767222c962891fdd823dd0a290b9
+
+  tracker.js exit: 0
+  api/tracker.js exit: 0
+  sources/SourceConnector.js exit: 0
+  sources/aggregator.js exit: 0
+  sources/dcard.js exit: 0
+  sources/ptt.js exit: 0
+
+Compiling './tests/test_ppt_timestamp.py'...
+Compiling './tests/test_since_filter.py'...
+Compiling './tests/test_source_schema.py'...
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+210 passed, 1 warning in 0.26s
+
+PRD §1-§15 SHA256 (must = 5b11411354df2344…):
+  §1-§15 SHA256: 5b11411354df2344
+  expected     : 5b11411354df2344
+  MATCH
