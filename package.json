@@ -4,5 +4,10 @@
   "private": true,
   "engines": {
     "node": ">=18"
+  },
+  "scripts": {
+    "build": "echo 'no build step — vanilla static + serverless (vercel.json drives deployment)'",
+    "verify": "python3 -m compileall . && python3 -m pytest -q",
+    "check": "for f in tracker.js api/tracker.js sources/*.js; do node --check \"$f\"; done"
   }
 }
