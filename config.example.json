@@ -16,6 +16,8 @@
                     "ptt",
                     "dcard"
                 ],
+    "aggregate":  true,
+    "_aggregate_note":  "Round-4 M1: cross-source dedup + heat ranking via `sources/aggregator.js`.  Set to `false` to opt out (CLI flag `--no-aggregate` or serverless `?aggregate=false` override).  Default true; round-3 callers see no diff when set to false.",
     "_sources_config_note":  "Optional.  Per-source toggles live in `sources_config`: { \"dcard\": { \"enabled\": true, \"forums\": [\"3c\", \"trending\"] } }.  When `sources_config` is absent (round-1 config) every source defaults to enabled.  When the `sources` array itself is absent the orchestrator defaults to [\"ptt\"] — round-1 behaviour preserved.  Dcard's network fetch is gated behind `DCARD_FETCH_ENABLED=1` (off by default — see `.env.example`) so CI / sandbox runs stay deterministic.",
     "sources_config":  {
                            "dcard":  {

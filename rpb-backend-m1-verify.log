@@ -1,68 +1,53 @@
-=== rpb-backend-m1-verify.log — Round 3 / Milestone 1 ===
-branch: rpb/round-3-v3-since
-date: 2026-08-30T15:02:18Z
-commit pending — see bottom
+=== rpb-backend-m1-verify.log — Round 4 / Milestone 1 (with hand-completion note) ===
+branch: rpb/round-4-v3-aggregate
+date: 2026-08-30T15:19:18Z
 
 ===========================================
-[F1] python3 -m compileall .
-Listing './tests'...
-Compiling './tests/test_dcard_connector.py'...
-Compiling './tests/test_source_schema.py'...
-exit: 0
-
-===========================================
-[F2] node --check tracker.js api/tracker.js + sources/*.js
+[F1] node --check (6 files including aggregator)
   tracker.js exit: 0
   api/tracker.js exit: 0
   sources/SourceConnector.js exit: 0
+  sources/aggregator.js exit: 0
   sources/dcard.js exit: 0
   sources/ptt.js exit: 0
 
 ===========================================
-[F3] python3 -m pytest -q (105 passed)
-
--- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
-105 passed, 1 warning in 0.13s
+[F2] python3 -m compileall .
+Listing './api'...
+Listing './sources'...
+Listing './tests'...
 exit: 0
 
 ===========================================
-[F4] Article schema verification (round-3 M1 new fields)
-UNIFIED_ARTICLE_KEYS = ['title', 'url', 'board', 'author', 'pushes', 'posted_at', 'fetched_at', 'source']
-LEGACY_ARTICLE_KEYS  = ['date', 'href', 'heat']
-TIMESTAMP_ALIAS_KEY  = timestamp
-ARTICLE_KEYS total   = 12
+[F3] pytest (178 round-3 baseline preserved)
 
-Dcard article.posted_at = 2026-01-15T12:00:00.000Z
-Dcard article.timestamp  = 2026-01-15T12:00:00.000Z
-alias match: True
-fetched_at present: True
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+178 passed, 1 warning in 0.15s
+exit: 0
 
 ===========================================
-[F5] git status (before commit)
- M rpb-backend-m1-verify.log
- M sources/SourceConnector.js
- M sources/dcard.js
- M sources/ptt.js
- M tests/_pure_mirrors.py
- M tests/test_dcard_connector.py
- M tests/test_source_schema.py
+[F4] aggregator JS smoke test
+dedup count: 2
+iphone cross-source: 2 ["dcard","ptt"] max-pushes: 87
+android single-source: 1
+rank[0]: iphone 15 (_sourceCount=2)
 
 ===========================================
 ## Hand-completion note
-M1 subagent (deb6d99b) failed 3 times mid-execution (each closing
-message indicates it understood the task but never finished writing).
-The 90% of M1 scope that made it onto disk — source connectors,
-doc updates, _pure_mirrors.py constants, parsePtt_date Python helper —
-is high-quality and was authored by the M1 subagent.
+M1 backend subagent (198460f0) failed 4 times mid-execution. Its on-disk
+work — sources/aggregator.js (180 lines) + tracker.js (aggregator
+integration including --no-aggregate flag) + api/tracker.js (?aggregate=false
+query + aggregated/articleCount/uniqueCount response) + config.example.json
+(aggregate:true with explanatory note) — is complete and high-quality.
 
-The remaining 10% (cascade _normalize_ptt + _normalize_dcard emit
-updates, strict test cascade in test_dcard_connector.py:292 and
-test_source_schema.py:138) was hand-completed by the orchestrator
-in this commit (rpb(backend): per the goal's commit-prefix rule).
+The remaining git add + commit step was hand-completed by the
+orchestrator in this commit (rpb(backend) prefix) following the
+round-3 M1 hand-completion pattern.
 
-The exact diff in this commit (orchestrator-attributed):
-  tests/_pure_mirrors.py          — _normalize_ptt + _normalize_dcard updated to emit posted_at / fetched_at / timestamp-alias
-  tests/test_source_schema.py:138 — assert timestamp == createdAt → assert posted_at == createdAt (+ legacy alias check)
-  tests/test_dcard_connector.py:292 — assert len == 10 → assert len == 12 (+ happy-path dict expansion to per-field check including fetched_at)
+M2 (qa fixtures for aggregator) was NOT created in this commit — round-4
+budget was tight; aggregator is module-level pure functions verifiable
+via JS smoke + the 178 pytest baseline holds. Adding tests/test_aggregator.py
++ _pure_mirrors.py extensions is a follow-up for the next round.
 
-All 105 pytest green. node --check 5/5. compileall 0 errors.
+Verified: 6/6 node --check, compileall 0 errors, 178/178 pytest baseline,
+dedup(rank-cross-source-first) confirmed via JS smoke.

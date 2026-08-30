@@ -32,6 +32,10 @@ const path = require('path');
 const { PttConnector } = require('./sources/ptt');
 const { DcardConnector } = require('./sources/dcard');
 const { resolveSources } = require('./sources/SourceConnector');
+// Round-4 M1: cross-source aggregator (dedup by URL + tuple, rank by heat).
+// Pure functions; safe to require unconditionally because the require cost
+// is paid once at module load.
+const { dedup, rankByHeat } = require('./sources/aggregator');
 
 const CONFIG_FILE = path.join(__dirname, 'config.json');
 const READ_FILE = path.join(__dirname, 'read_articles.json');
@@ -338,9 +342,21 @@ async function checkBoards(config, ctx) {
  * ``ctx`` argument (``{ since, limit }``) that propagates a
  * ``since`` ISO 8601 cutoff to every connector.  Round-1 callers
  * passing only ``config`` keep working — ``ctx`` defaults to ``{}``.
+ *
+ * Round-4 M1: ``ctx.aggregate`` (default ``true``) and
+ * ``config.aggregate`` (default ``true``) control cross-source
+ * dedup + heat ranking via ``sources/aggregator.js``.  Either
+ * ``ctx.aggregate === false`` or ``config.aggregate === false``
+ * short-circuits to round-3 behaviour (per-source list, sorted by
+ * ``pushes`` desc, no cross-source merging).  CLI flag
+ * ``--no-aggregate`` flips the default off.
  */
 async function run(config, ctx = {}) {
   const since = normalizeSince(ctx.since);
+  // Round-4 M1: aggregation is opt-out.  ``ctx.aggregate !== false``
+  // (default true) AND ``config.aggregate !== false`` (default true) →
+  // run the aggregator.  Either side set to ``false`` → round-3 mode.
+  const aggregate = ctx.aggregate !== false && config.aggregate !== false;
 
   console.log('==================================================');
   console.log('🤖 PTT Tracker Started');
@@ -349,12 +365,28 @@ async function run(config, ctx = {}) {
   console.log(`📌 Boards: ${(config.boards || []).join(', ') || '(source defaults)'}`);
   console.log(`🔑 Keywords: ${(config.keywords || []).join(', ') || 'None'}`);
   console.log(`🔥 Min Heat: ${config.min_heat ?? 1}`);
+  console.log(`🌐 Aggregate (cross-source dedup + heat rank): ${aggregate ? 'on' : 'off'}`);
   if (since) {
     console.log(`⏱️  since: ${since}`);
   }
   debugLog('--------------------------------------------------');
 
   const { newArticles, keywordMatches } = await checkSources(config, { since, limit: ctx.limit });
+
+  // Round-4 M1: cross-source dedup + heat ranking.  ``keywordMatches``
+  // intentionally stays pre-aggregator — keyword alerts are a per-source
+  // product feature and a cross-source merged record would only fire
+  // once for two platforms reporting the same story.  ``newArticles``
+  // is what the dashboard / top-N list consumes, so it gets aggregated.
+  let articles = newArticles;
+  const articleCount = newArticles.length;
+  let uniqueCount = articleCount;
+  if (aggregate && articles.length > 0) {
+    articles = dedup(articles);
+    articles = rankByHeat(articles);
+    uniqueCount = articles.length;
+  }
+  console.log(`📊 aggregated=${aggregate}  articleCount=${articleCount}  uniqueCount=${uniqueCount}`);
 
   if (keywordMatches.length > 0) {
     console.log('\n🎯 KEYWORD MATCHES:');
@@ -365,16 +397,19 @@ async function run(config, ctx = {}) {
     }
   }
 
-  if (newArticles.length > 0) {
-    console.log(`\n🔥 Hot Articles (${newArticles.length}):`);
-    const sorted = [...newArticles].sort((a, b) => b.pushes - a.pushes);
+  if (articles.length > 0) {
+    // Round-4 M1: when aggregation is on, ``articles`` is already
+    // deduped + heat-ranked by the aggregator.  When off, fall back to
+    // the round-3 sort (pushes desc).  Either way we slice the top 10.
+    console.log(`\n🔥 Hot Articles (${articles.length}):`);
+    const sorted = aggregate ? articles : [...articles].sort((a, b) => b.pushes - a.pushes);
     for (const article of sorted.slice(0, 10)) {
       console.log(formatArticle(article));
       console.log('');
     }
   }
 
-  if (keywordMatches.length === 0 && newArticles.length === 0) {
+  if (keywordMatches.length === 0 && articles.length === 0) {
     console.log('\n✅ No new articles matching criteria');
   }
 
@@ -382,19 +417,30 @@ async function run(config, ctx = {}) {
   console.log('✅ Done');
   console.log('==================================================');
 
-  return { newArticles, keywordMatches };
+  // Round-4 M1: surface aggregation counts + the aggregated list so
+  // ``api/tracker.js`` (which calls ``checkSources`` directly) can echo
+  // the same shape on the serverless path.
+  return {
+    newArticles: articles,
+    keywordMatches,
+    aggregated: aggregate,
+    articleCount,
+    uniqueCount,
+  };
 }
 
 /**
  * Parse the flat ``--key value`` argv stream into a plain object.
- * Recognised keys (round-3 M2): ``--since <ISO>``.  Unknown flags are
- * ignored — round-1 callers that still pass ``--watch`` / ``-w`` skip
- * this loop entirely because we branch on the *first* arg before
- * scanning.
+ * Recognised keys:
+ *   * ``--since <ISO>`` (round-3 M2) — ISO 8601 cutoff.
+ *   * ``--no-aggregate`` (round-4 M1) — boolean flag (no value), sets
+ *     ``aggregate = false`` so the orchestrator returns the round-3
+ *     per-source list instead of the deduped+ranked one.  Defaults to
+ *     ``true`` (aggregate on) when absent.
  *
- * ``--since`` accepts an ISO 8601 string (``2026-01-01T00:00:00.000Z``)
- * and threads it through ``run(config, { since })``.  ``null`` /
- * missing → round-1 default (no time filter).
+ * Unknown flags are ignored — round-1 callers that still pass ``--watch``
+ * / ``-w`` skip this loop entirely because we branch on the *first* arg
+ * before scanning.
  */
 function parseCliFlags(args) {
   const out = {};
@@ -404,6 +450,8 @@ function parseCliFlags(args) {
       const next = args[i + 1];
       out.since = next != null ? next : null;
       i += 1;
+    } else if (arg === '--no-aggregate') {
+      out.aggregate = false;
     }
   }
   return out;

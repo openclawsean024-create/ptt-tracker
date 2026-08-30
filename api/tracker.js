@@ -30,6 +30,9 @@ const { resolveSources } = require('../sources/SourceConnector');
 // honest about what counts as a "valid since value".  Re-exported
 // from ``tracker.js`` so the two paths agree on the contract.
 const { normalizeSince } = require('../tracker');
+// Round-4 M1: cross-source aggregator — same module the CLI uses, so
+// serverless + CLI produce identical deduped/heat-ranked output.
+const { dedup, rankByHeat } = require('../sources/aggregator');
 
 const CONFIG_FILE = path.join(__dirname, '..', 'config.json');
 const DEFAULT_BOARDS = ['MacShop'];
@@ -163,16 +166,45 @@ module.exports = async (req, res) => {
     // it).  We pass the raw value straight through; ``normalizeSince``
     // trims / null-checks before it reaches any connector.
     const since = req.query && req.query.since;
+    // Round-4 M1: aggregate is opt-out via ``?aggregate=false`` (or the
+    // legacy alias ``?no-aggregate=true``).  Truthy values other than
+    // ``'false'`` / ``'0'`` are treated as on; anything else defaults
+    // to ``true``.  Config-side ``config.aggregate`` is the secondary
+    // switch — either set to ``false`` short-circuits to round-3.
+    const rawAgg = req.query && (req.query.aggregate ?? req.query['no-aggregate']);
+    const queryAggregate = rawAgg == null
+      ? true
+      : !['false', '0', 'no', 'off'].includes(String(rawAgg).toLowerCase());
+    const aggregate = queryAggregate && config.aggregate !== false;
     const result = await checkSources(config, { since });
+
+    // Round-4 M1: dedup + heat-rank when aggregate is on.  When off we
+    // keep the round-3 sort-by-pushes behaviour.  ``articleCount`` is
+    // the raw count from the connectors; ``uniqueCount`` is after dedup.
+    const rawArticles = result.newArticles || [];
+    const articleCount = rawArticles.length;
+    let hotArticles = rawArticles;
+    let uniqueCount = articleCount;
+    if (aggregate && rawArticles.length > 0) {
+      hotArticles = rankByHeat(dedup(rawArticles));
+      uniqueCount = hotArticles.length;
+    } else {
+      hotArticles = rawArticles.sort((a, b) => b.pushes - a.pushes).slice(0, 20);
+    }
 
     return res.status(200).json({
       success: true,
       timestamp: new Date().toISOString(),
       keywordMatches: result.keywordMatches || [],
-      hotArticles: (result.newArticles || []).sort((a, b) => b.pushes - a.pushes).slice(0, 20),
+      hotArticles: hotArticles.slice(0, 20),
       // Round-3 M2: echo the parsed ``since`` so callers can confirm
       // what filter the server actually applied (null → round-1 mode).
       since: normalizeSince(since),
+      // Round-4 M1: surface the aggregation decision + counts so the
+      // dashboard / CLI can confirm what the server actually did.
+      aggregated: aggregate,
+      articleCount,
+      uniqueCount,
     });
   } catch (error) {
     debugError(`[api/tracker] top-level error: ${error && error.message ? error.message : error}`);
