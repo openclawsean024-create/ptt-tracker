@@ -885,3 +885,40 @@ v3.0 的 follow-up goal 草稿已存放在 `prompts/ptt-tracker/follow-up-v3.0.m
 - `CHANGELOG.md`:在 round-1 entry **之後**新增 round-2 entry,Keep-a-Changelog 1.1.0 風格(`Added` / `Changed` / `Deferred`)。Round-1 entry 完整保留。
 - `PRD/SPEC.md`:純 append 附錄 B;**§1-§15 與附錄 A byte-for-byte 不動**(SHA256 of first 795 lines 仍為 `5b11411354df23449ed953dcf6b1d7113300a52393703bad8d14cc18060f7999`,與 round-1 round-1 末版一致)。
 - `rpb-docs-m4-verify.log`:scope check + bash block validation + SPEC §1-§15 SHA256 integrity check。
+
+## 附錄 C — round-3 實作紀錄(2026-08-29)
+
+> 本輪把 round-2 M3 closing report 的 finding #3(PTT `timestamp` 語意是 scrape time、Dcard `timestamp` 是 post time → 對 `since`-filtering 會誤判新舊)修掉,並把 `since`-filtering 從 CLI / serverless 介面一路 wire 到各 `SourceConnector.fetch()`。**§1-§15 + 附錄 A + 附錄 B byte-for-byte 不動**,僅 append 本附錄。
+
+### C.1 round-3 範圍一句話
+
+把 `Article` schema 的時間語意統一(`posted_at` = post time,`fetched_at` = scrape time,`timestamp` 退到 alias),並把 `since`-filtering 從介面(`tracker.js --since <ISO>`、`/api/tracker?since=<ISO>`)wire 到 fetcher(PTT 用 `posted_at` heuristic 比對,Dcard 用原生 `?after=<ISO>` query param)。
+
+### C.2 round-3 commits(本附錄撰寫時)
+
+最終 round-3 commits(以 `git log --oneline -10` 為準,由 orchestrator 在 round-3 final verify 階段填入):
+
+- `rpb(backend): round-3 M1 — Article.time semantics split + PTT posted_at heuristic`
+- `rpb(backend): round-3 M2 — orchestrator since-filtering propagation (CLI + serverless)`
+- `rpb(qa): round-3 M3 — mirror tests for posted_at + since filter (parsePtt_date + apply_since_filter)`
+- `rpb(docs): round-3 docs — README timestamp note, CHANGELOG round-3 entry, SPEC 附錄 C`(本 commit)
+- `rpb(orchestrator): round-3 final verify + summary`(由 orchestrator 收尾時補)
+
+### C.3 round-3 文件同步摘要
+
+- `README.md`:在「v3.0 狀態(Status)」段**下方**新增 2 個 list-item —— 「時間語意對齊(round-3)」+「`since`-filtering(round-3)」。字數 263 → 291(1.11x,well under 1.5x cap;hard ceiling 350)。
+- `CHANGELOG.md`:在 round-2 entry **之後**新增 round-3 entry(round-1 / round-2 entry 完整保留)。Round-3 entry ≤ 30 行。
+- `PRD/SPEC.md`:純 append 附錄 C;**§1-§15 + 附錄 A + 附錄 B byte-for-byte 不動**(SHA256 of first 795 lines 仍為 `5b11411354df23449ed953dcf6b1d7113300a52393703bad8d14cc18060f7999`,round-1 / round-2 baseline 一致)。
+- `rpb-docs-m4-verify.log`:scope check + README 字數 + CHANGELOG entry 長度 + SPEC §1-§15 SHA256 integrity check。
+
+### C.4 round-3 deferred 項目(再次明示)
+
+下列項目 round-3 **明確不做**,留 round-4+ 評估:
+
+- **Threads connector**:需 Meta Business 帳號申請,非個人可解。
+- **巴哈姆特 connector**:目前無官方公開 API;scrape 法規 grey zone。
+- **AI 情緒分類(GPT-4o-mini)**:需 OpenAI 帳號 + cost;留 round 4。
+- **多通道 LINE / Slack / Email 警示**(SPEC §3 P0-4):需外部 webhook 憑證;留 round 5+。
+- **PDF 週報**(SPEC §3 P0-5):留 round 5+。
+- **跨來源去重演算法**:本輪只做各 source 內 since-filter,不跨來源 dedup;留 round 4。
+- **BullMQ / Redis worker infra**(SPEC §3 P0-1「每平台獨立 worker」):現規模不需要;留 round 5+。

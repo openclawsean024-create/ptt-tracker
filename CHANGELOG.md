@@ -50,3 +50,14 @@
 - **多通道 LINE / Slack / Email 警示**(SPEC §3 P0-4):需外部 webhook 憑證;留 round 5+。
 - **PDF 週報**(SPEC §3 P0-5):留 round 5+。
 - **BullMQ / Redis worker infra**(SPEC §3 P0-1「每平台獨立 worker」):現規模不需要;留 round 5+。
+
+## [Unreleased] — round-3 (v3.0 timestamp alignment + since-filtering)
+
+> 本輪把 round-2 M3 finding #3 的 timestamp 語意不一致修掉,並把 `since`-filtering 從介面一路 wire 到 fetcher。**§1-§15 不變**,僅附加附錄 C 紀錄實作範圍。Backend / QA 的詳細 commit 列表待 round-3 final verify 後補。
+
+### Added
+- **Article schema 時間語意對齊**:新增 `posted_at`(post time) + `fetched_at`(scrape time) 兩個明確語意欄位;`timestamp` 退到 alias 角色(向後相容 round-1 / round-2)。
+- **`since`-filtering 入口**:CLI 新增 `--since <ISO>` flag;serverless `/api/tracker` 接受 `?since=<ISO>` query param;orchestrator 把 `since` 往下傳給各 `SourceConnector.fetch()`。
+- **PTT `posted_at` heuristic**:`currentYear + raw.date` 拼出 post time;若距離現在 > 90 天,fallback 到 `currentYear - 1`(處理年底 / 年初跨年文章)。
+- **Dcard 原生 since filter**:透傳 `?after=<ISO>` query param 給 Dcard `/api/posts`(Dcard 原生支援)。
+- **Tests**:`tests/test_ppt_timestamp.py`(happy path / 跨年 / grace / defensive default) + `tests/test_since_filter.py`(PTT-side + Dcard-side + cross-source intersection);`tests/_pure_mirrors.py` 延伸 `parsePtt_date` + `apply_since_filter`(待 M3 commit 後補 round-3 detailed test 列表)。

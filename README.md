@@ -17,6 +17,8 @@ Live: https://ptt-alertor-olive.vercel.app
 
 - **目前支援來源**:`PTT`(既有)、`Dcard`(新,基於 Dcard 官方 `/api/posts` API,無需登入)。
   在 `config.json` 用 `sources` 欄位切換,例如 `"sources": ["ptt", "dcard"]`;未填則預設只跑 `["ptt"]`(與 v2.x 行為相容)。
+- **時間語意對齊(round-3)**:所有來源的 `Article.timestamp` 都對齊到 **post time**(`posted_at`);`fetched_at` 記錄 scrape time。`timestamp` 保留為 alias,向後相容。
+- **`since`-filtering(round-3)**:CLI 用 `node tracker.js --since <ISO>`,serverless 用 `/api/tracker?since=<ISO>` query param;PTT 用 `posted_at` heuristic 比對,Dcard 用原生 `?after=<ISO>`。
 - **Roadmap(規劃中,未實作)**:
   - `Threads`:需 Meta Business 帳號申請,非個人可解。
   - `巴哈姆特`:目前無公開 API,scrape 法規 grey zone。
