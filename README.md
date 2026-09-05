@@ -87,3 +87,5 @@ python3 -m pytest -q
 - PTT 連線偶爾會有 `ECONNRESET`,目前已加上自動 retry
 - `.gitignore` 已排除 `config.json`、`.env`、`*.pem` — 請用 `.env.example` 當模板
 - 完整變動紀錄見 [`CHANGELOG.md`](CHANGELOG.md);威脅模型與 secrets 政策見 [`SECURITY.md`](SECURITY.md);本輪 milestone 規劃見 [`PLAN.md`](PLAN.md)
+
+<!-- Last validated: 2026-09-06 by OpenClaw Overnight Dev -->
