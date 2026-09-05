@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Ptt Tracker — OpenClaw 出品</title>
+<meta name="theme-color" content="#5EBFA1" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='20' fill='%235EBFA1'/%3E%3Ctext x='50' y='68' font-size='56' text-anchor='middle' fill='white' font-weight='900' font-family='sans-serif'%3EP%3C/text%3E%3C/svg%3E" />
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config = {
+  theme: {
+    extend: {
+      colors: {
+        bg: '#FAFAF7',
+        card: '#FFFFFF',
+        mint: { 50: '#E6F4F0', 100: '#D2EBE4', 500: '#5EBFA1', 600: '#4DA68A', 700: '#3D8C73' },
+        ink: { 900: '#1A1A1A', 600: '#6B6B6B', 400: '#9A9A95' },
+        line: '#EAEAE5',
+        blue: '#4F8BFF',
+        warn: '#F59E0B',
+        danger: '#EF4444',
+      },
+      fontFamily: {
+        sans: ['"Noto Sans TC"', 'system-ui', '-apple-system', 'sans-serif'],
+        mono: ['"JetBrains Mono"', 'ui-monospace', 'monospace'],
+      },
+      borderRadius: { xl2: '16px' },
+    },
+  },
+};
+</script>
+<style>
+  body { font-family: 'Noto Sans TC', system-ui, sans-serif; background: #FAFAF7; color: #1A1A1A; }
+  .sidebar-item { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-radius: 10px; color: #6B6B6B; font-size: 14px; font-weight: 500; cursor: pointer; transition: all 0.15s; }
+  .sidebar-item:hover { background: #F5F5F0; color: #1A1A1A; }
+  .sidebar-item.active { background: #E6F4F0; color: #1A1A1A; font-weight: 600; }
+  .card { background: #FFFFFF; border: 1px solid #EAEAE5; border-radius: 16px; padding: 20px; }
+  .kpi { display: flex; flex-direction: column; gap: 8px; }
+  .kpi .label { font-size: 12px; color: #6B6B6B; }
+  .kpi .value { font-size: 32px; font-weight: 700; line-height: 1.1; font-family: 'JetBrains Mono', monospace; }
+  .badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+  .badge-mint { background: #E6F4F0; color: #3D8C73; }
+  .badge-blue { background: #E5EFFF; color: #2563EB; }
+  .badge-warn { background: #FEF3C7; color: #B45309; }
+  .badge-danger { background: #FEE2E2; color: #B91C1C; }
+  .btn-primary { background: #5EBFA1; color: white; border: none; border-radius: 10px; padding: 10px 20px; font-weight: 600; cursor: pointer; transition: all 0.15s; }
+  .btn-primary:hover { background: #4DA68A; }
+  .progress { height: 6px; background: #F5F5F0; border-radius: 999px; overflow: hidden; }
+  .progress-bar { height: 100%; background: #5EBFA1; transition: width 0.3s; }
+  .quick-action { display: flex; align-items: center; gap: 12px; padding: 12px; border-radius: 10px; cursor: pointer; transition: all 0.15s; }
+  .quick-action:hover { background: #F5F5F0; }
+  .quick-action .icon { width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .timeline-item { display: flex; gap: 12px; padding: 10px 0; border-bottom: 1px solid #F5F5F0; }
+  .timeline-item:last-child { border-bottom: none; }
+  .timeline-dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 6px; flex-shrink: 0; }
+  .mobile-nav { position: fixed; bottom: 0; left: 0; right: 0; background: white; border-top: 1px solid #EAEAE5; display: none; padding: 8px 0; z-index: 50; }
+  .mobile-nav button { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 0; color: #6B6B6B; font-size: 10px; background: none; border: none; flex: 1; cursor: pointer; }
+  .mobile-nav button.active { color: #5EBFA1; font-weight: 600; }
+  @media (max-width: 768px) {
+    .desktop-sidebar { display: none; }
+    .mobile-nav { display: flex; }
+    .main-content { padding-bottom: 80px; }
+  }
+</style>
+</head>
+<body class="min-h-screen flex">
+  <!-- Sidebar -->
+  <aside class="desktop-sidebar w-[220px] bg-white border-r border-line h-screen sticky top-0 flex flex-col p-4 flex-shrink-0">
+    <div class="flex items-center gap-3 px-2 mb-8 mt-2">
+      <div class="w-10 h-10 rounded-xl bg-mint-500 flex items-center justify-center text-white font-black text-lg">P</div>
+      <div>
+        <div class="font-bold text-sm">Ptt Tracker</div>
+        <div class="text-xs text-ink-600">v1.0 · Ptt</div>
+      </div>
+    </div>
+    <nav class="flex-1 flex flex-col gap-1">
+      <a class="sidebar-item active" data-page="首頁"><span>🏠</span><span>首頁</span></a>
+        <a class="sidebar-item" data-page="看板列表"><span>📋</span><span>看板列表</span></a>
+        <a class="sidebar-item" data-page="熱門文章"><span>🔥</span><span>熱門文章</span></a>
+        <a class="sidebar-item" data-page="我的最愛"><span>⭐</span><span>我的最愛</span></a>
+        <a class="sidebar-item" data-page="搜尋"><span>🔍</span><span>搜尋</span></a>
+        <a class="sidebar-item" data-page="深色模式"><span>🌙</span><span>深色模式</span></a>
+        <a class="sidebar-item" data-page="設定"><span>⚙️</span><span>設定</span></a>
+        <a class="sidebar-item" data-page="登出"><span>🚪</span><span>登出</span></a>
+    </nav>
+    <div class="border-t border-line pt-3 mt-3 text-xs text-ink-600 px-2">
+      <div>v1.0.0</div>
+      <div class="mt-1">© 2026 OpenClaw</div>
+    </div>
+  </aside>
+
+  <!-- Main Content -->
+  <main class="flex-1 main-content">
+    <!-- Header -->
+    <header class="bg-white border-b border-line px-8 py-6">
+      <div class="flex items-start justify-between">
+        <div>
+          <h1 class="text-2xl font-bold mb-1">歡迎，使用者</h1>
+          <div class="flex items-center gap-2 text-sm text-ink-600">
+            <span class="w-2 h-2 rounded-full bg-mint-500"></span>
+            <span>看板瀏覽模式 · 訪客</span>
+          </div>
+        </div>
+        <div class="flex items-center gap-3">
+          <button class="px-3 py-2 rounded-lg border border-line text-sm hover:bg-bg transition" id="btn-notify">🔔</button>
+          <div class="w-9 h-9 rounded-full bg-mint-100 flex items-center justify-center font-bold text-mint-700">U</div>
+        </div>
+      </div>
+    </header>
+
+    <div class="p-8">
+      <!-- Top KPI Row -->
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-5 mb-5">
+        <div class="card kpi">
+        <div class="flex items-center justify-between">
+          <div class="label">已追蹤看板</div>
+          <span class="badge badge-mint">●</span>
+        </div>
+        <div class="value">5</div>
+        <div class="text-xs text-ink-600">Stock / NBA / Gossiping 等</div>
+        
+      </div>
+      <div class="card kpi">
+        <div class="flex items-center justify-between">
+          <div class="label">今日熱門</div>
+          <span class="badge badge-blue">●</span>
+        </div>
+        <div class="value">23</div>
+        <div class="text-xs text-ink-600">+5 較昨日</div>
+        
+      </div>
+      <div class="card kpi">
+        <div class="flex items-center justify-between">
+          <div class="label">我的最愛</div>
+          <span class="badge badge-warn">●</span>
+        </div>
+        <div class="value">12</div>
+        <div class="text-xs text-ink-600">本週 +2</div>
+        
+      </div>
+      </div>
+
+      <!-- Bottom Detail Row -->
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-5">
+        <div class="card">
+        <div class="flex items-center justify-between mb-3">
+          <div class="font-bold text-base">快速操作</div>
+          <a class="text-xs text-ink-600">全部 →</a>
+        </div>
+        <div class="space-y-1">
+          <div class="quick-action">
+            <div class="icon bg-mint-100 text-mint-700">＋</div>
+            <div class="flex-1">
+              <div class="text font-semibold text-sm">新增記錄</div>
+              <div class="text-xs text-ink-600">快速建立新項目</div>
+            </div>
+          </div>
+          <div class="quick-action">
+            <div class="icon bg-blue-100 text-blue">📋</div>
+            <div class="flex-1">
+              <div class="text font-semibold text-sm">匯出報表</div>
+              <div class="text-xs text-ink-600">PDF / Excel / CSV</div>
+            </div>
+          </div>
+          <div class="quick-action">
+            <div class="icon bg-yellow-100 text-warn">⚡</div>
+            <div class="flex-1">
+              <div class="text font-semibold text-sm">批次處理</div>
+              <div class="text-xs text-ink-600">一次處理多筆</div>
+            </div>
+          </div>
+          <div class="quick-action">
+            <div class="icon bg-red-100 text-danger">🔔</div>
+            <div class="flex-1">
+              <div class="text font-semibold text-sm">通知設定</div>
+              <div class="text-xs text-ink-600">管理提醒規則</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="flex items-center justify-between mb-3">
+          <div class="font-bold text-base">本月行程</div>
+          <div class="text-xs text-ink-600">9 / 2026</div>
+        </div>
+        <div class="grid grid-cols-7 gap-1 text-xs text-center mb-1 text-ink-600">
+          <div>一</div><div>二</div><div>三</div><div>四</div><div>五</div><div>六</div><div>日</div>
+        </div>
+        <div class="grid grid-cols-7 gap-1 text-xs text-center">
+          <div class="py-1.5 text-ink-400">1</div>
+          <div class="py-1.5 text-ink-400">2</div>
+          <div class="py-1.5">3</div>
+          <div class="py-1.5">4</div>
+          <div class="py-1.5 bg-mint-100 text-mint-700 rounded font-semibold">5</div>
+          <div class="py-1.5">6</div>
+          <div class="py-1.5">7</div>
+          <div class="py-1.5">8</div>
+          <div class="py-1.5">9</div>
+          <div class="py-1.5">10</div>
+          <div class="py-1.5">11</div>
+          <div class="py-1.5">12</div>
+          <div class="py-1.5">13</div>
+          <div class="py-1.5">14</div>
+          <div class="py-1.5 bg-blue text-white rounded font-semibold">15</div>
+          <div class="py-1.5">16</div>
+          <div class="py-1.5">17</div>
+          <div class="py-1.5">18</div>
+          <div class="py-1.5">19</div>
+          <div class="py-1.5">20</div>
+          <div class="py-1.5">21</div>
+          <div class="py-1.5 bg-mint-100 text-mint-700 rounded">22</div>
+          <div class="py-1.5">23</div>
+          <div class="py-1.5">24</div>
+          <div class="py-1.5">25</div>
+          <div class="py-1.5">26</div>
+          <div class="py-1.5">27</div>
+          <div class="py-1.5">28</div>
+          <div class="py-1.5">29</div>
+          <div class="py-1.5">30</div>
+        </div>
+        <div class="mt-3 pt-3 border-t border-line space-y-2 text-xs">
+          <div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-mint-500"></span><span>09:00 站會</span></div>
+          <div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-blue"></span><span>14:00 客戶會議</span></div>
+          <div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-warn"></span><span>17:30 截止繳交</span></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="flex items-center justify-between mb-3">
+          <div class="font-bold text-base">最近動態</div>
+          <a class="text-xs text-ink-600">查看全部 →</a>
+        </div>
+        <div class="space-y-0">
+          <div class="timeline-item">
+            <div class="timeline-dot bg-mint-500"></div>
+            <div class="flex-1 text-sm">
+              <div class="font-medium">新客戶完成首次預約</div>
+              <div class="text-xs text-ink-600 mt-0.5">5 分鐘前 · 系統自動</div>
+            </div>
+          </div>
+          <div class="timeline-item">
+            <div class="timeline-dot bg-blue"></div>
+            <div class="flex-1 text-sm">
+              <div class="font-medium">報表匯出完成</div>
+              <div class="text-xs text-ink-600 mt-0.5">1 小時前 · PDF 1.2MB</div>
+            </div>
+          </div>
+          <div class="timeline-item">
+            <div class="timeline-dot bg-warn"></div>
+            <div class="flex-1 text-sm">
+              <div class="font-medium">待辦提醒：3 件將到期</div>
+              <div class="text-xs text-ink-600 mt-0.5">3 小時前 · 提醒中心</div>
+            </div>
+          </div>
+          <div class="timeline-item">
+            <div class="timeline-dot bg-ink-400"></div>
+            <div class="flex-1 text-sm">
+              <div class="font-medium">系統備份完成</div>
+              <div class="text-xs text-ink-600 mt-0.5">昨天 23:00 · 排程任務</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      </div>
+
+      <!-- Footer -->
+      <footer class="mt-12 pt-6 border-t border-line text-xs text-ink-600 flex items-center justify-between">
+        <div>Ptt Tracker · OpenClaw 出品</div>
+        <div>Made with OpenClaw · 2026-09-06</div>
+      </footer>
+    </div>
+  </main>
+
+  <!-- Mobile Bottom Nav -->
+  <nav class="mobile-nav">
+    <button><span>🏠</span><span>首頁</span></button>
+      <button><span>📋</span><span>看板列表</span></button>
+      <button><span>🔥</span><span>熱門文章</span></button>
+      <button><span>⭐</span><span>我的最愛</span></button>
+  </nav>
+
+<script>
+  // Sidebar nav click handler
+  document.querySelectorAll('.sidebar-item').forEach(item => {
+    item.addEventListener('click', () => {
+      document.querySelectorAll('.sidebar-item').forEach(i => i.classList.remove('active'));
+      item.classList.add('active');
+    });
+  });
+  // Quick actions demo
+  document.querySelectorAll('.quick-action').forEach(item => {
+    item.addEventListener('click', () => {
+      const title = item.querySelector('.text')?.textContent || '動作';
+      const toast = document.createElement('div');
+      toast.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#1A1A1A;color:white;padding:10px 20px;border-radius:10px;font-size:13px;z-index:1000;box-shadow:0 10px 30px rgba(0,0,0,0.2)';
+      toast.textContent = '✓ ' + title + ' 已觸發';
+      document.body.appendChild(toast);
+      setTimeout(() => toast.remove(), 2000);
+    });
+  });
+  // Notify
+  document.getElementById('btn-notify')?.addEventListener('click', () => {
+    alert('🔔 通知中心\n\n目前沒有新通知。');
+  });
+</script>
+</body>
+</html>
