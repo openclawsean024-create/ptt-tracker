@@ -1,0 +1,42 @@
+# Ruff configuration for ptt-tracker
+# Minimal rules — focus on real correctness, not stylistic refactors of legacy code.
+# Per spec: "不要大改 production code" — so we ignore most of the BLE001/UP/FURB noise
+# and let CI fail only on real bugs (E, F, W, B).
+
+target-version = "py39"
+line-length = 100
+
+[lint]
+# Conservative rule selection: only correctness rules.
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes
+    "W",   # pycodestyle warnings
+    "B",   # flake8-bugbear
+]
+
+ignore = [
+    "E501",  # line too long (legacy code, ignore)
+    "E402",  # module level import not at top (tests do this)
+    "E731",  # assigning lambdas (test fixtures use them)
+    "F401",  # imported but unused (test fixtures + re-exports)
+    "F841",  # local variable assigned but never used (test fixtures)
+    "B008",  # do not perform function calls in argument defaults (pytest fixtures)
+    "W293",  # whitespace on blank lines (legacy)
+    "W291",  # trailing whitespace (legacy)
+    "W292",  # no newline at end of file (legacy)
+]
+
+[lint.per-file-ignores]
+"tests/**/*.py" = [
+    "E402",  # tests often need late imports
+    "F401",  # test fixtures import symbols used by other tests
+    "F841",  # test fixture assignments kept for readability
+]
+"ptt_tracker.py" = [
+    "B",     # legacy production code — don't refactor
+]
+"tests/_pure_mirrors.py" = [
+    "B",     # mirror JS, must match byte-for-byte
+    "F",     # mirror imports deliberately
+]

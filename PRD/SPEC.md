@@ -1,6 +1,6 @@
 # 中文社群雷達 2.0 — PTT + Dcard + Threads 跨平台追蹤 — 規格計劃書 v3.0 (sweet-spot rewrite)
 
-> 版本：v3.0｜更新日期：2026-07-19｜維護者：Sophia (CPO) for Sean
+> 版本：v3.0.2｜更新日期：2026-09-06｜維護者：Sophia (CPO) for Sean
 > 對接技術：Alan (CTO) + Hermes Agent
 > 原始碼：https://github.com/openclawsean024-create/ptt-tracker
 > Live：https://ptt-alertor-olive.vercel.app

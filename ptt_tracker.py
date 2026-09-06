@@ -212,7 +212,7 @@ class PTTTracker:
     
     def run(self):
         """執行追蹤"""
-        print(f"\n🤖 PTT 文章追蹤器啟動")
+        print("\n🤖 PTT 文章追蹤器啟動")
         print(f"📌 追蹤看板: {', '.join(self.boards)}")
         if self.keywords:
             print(f"🔑 關鍵字: {', '.join(self.keywords)}")

@@ -15,3 +15,6 @@ config.json
 .env.*
 !.env.example
 *.pem
+
+# Python venv (Sean 10-repo-fleet)
+.venv/
